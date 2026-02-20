@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker volumes
+data/neo4j/
+data/kafka/
+data/zookeeper/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Planning & internal docs
+DocWeave*.pdf
+*.pdf
