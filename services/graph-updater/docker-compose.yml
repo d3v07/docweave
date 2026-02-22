@@ -1,0 +1,324 @@
+# =============================================================================
+# DocWeave Graph Updater Service - Local Development Environment
+# =============================================================================
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose up -d --build      # Rebuild and start
+#   docker-compose logs -f            # Follow logs
+#   docker-compose down -v            # Stop and remove volumes
+#
+# Services:
+#   - graph-updater: The main service (port 8004)
+#   - neo4j: Graph database (ports 7474, 7687)
+#   - kafka: Message broker (ports 9092, 29092)
+#   - zookeeper: Kafka dependency (port 2181)
+#   - kafka-ui: Kafka management UI (port 8080)
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # Graph Updater Service
+  # ===========================================================================
+  graph-updater:
+    build:
+      context: ../..
+      dockerfile: services/graph-updater/Dockerfile
+    container_name: graph-updater-dev
+    hostname: graph-updater
+    ports:
+      - "8004:8004"
+    environment:
+      # Neo4j Configuration
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=devpassword123
+      - NEO4J_DATABASE=neo4j
+      # Kafka Configuration
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_EXTRACTED_CLAIMS=extracted-claims
+      - KAFKA_TOPIC_GRAPH_UPDATES=graph-updates
+      - KAFKA_TOPIC_CONFLICTS=conflicts
+      - KAFKA_CONSUMER_GROUP_ID=graph-updater-local
+      # Service Configuration
+      - SERVICE_NAME=graph-updater
+      - SERVICE_PORT=8004
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - LOG_FORMAT=text
+      # Metrics
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9090
+    volumes:
+      # Mount source for hot reload during development
+      - ../../services/graph-updater:/app/services/graph_updater:ro
+      - ../../shared:/app/shared:ro
+    networks:
+      - graph-updater-network
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    labels:
+      - "com.docweave.service=graph-updater"
+      - "com.docweave.environment=development"
+
+  # ===========================================================================
+  # Neo4j Graph Database
+  # ===========================================================================
+  neo4j:
+    image: neo4j:5.17.0-community
+    container_name: graph-updater-neo4j
+    hostname: neo4j
+    ports:
+      - "7474:7474"  # HTTP Browser
+      - "7687:7687"  # Bolt Protocol
+    environment:
+      - NEO4J_AUTH=neo4j/devpassword123
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+      # Memory settings for local development
+      - NEO4J_dbms_memory_heap_initial__size=256m
+      - NEO4J_dbms_memory_heap_max__size=512m
+      - NEO4J_dbms_memory_pagecache_size=256m
+      # Performance tuning
+      - NEO4J_dbms_connector_bolt_listen__address=:7687
+      - NEO4J_dbms_connector_http_listen__address=:7474
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+    networks:
+      - graph-updater-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Zookeeper (Kafka Dependency)
+  # ===========================================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    container_name: graph-updater-zookeeper
+    hostname: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - graph-updater-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Apache Kafka
+  # ===========================================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: graph-updater-kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      # Development-friendly settings
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - graph-updater-network
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Kafka Topic Initialization
+  # ===========================================================================
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: graph-updater-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - graph-updater-network
+    command: >
+      bash -c "
+        echo 'Creating Kafka topics for graph-updater...'
+
+        # Wait for Kafka to be fully ready
+        sleep 5
+
+        # Create topics
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka:9092 \
+          --partitions 3 \
+          --replication-factor 1 \
+          --topic extracted-claims \
+          --config retention.ms=86400000
+
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka:9092 \
+          --partitions 3 \
+          --replication-factor 1 \
+          --topic graph-updates \
+          --config retention.ms=86400000
+
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka:9092 \
+          --partitions 3 \
+          --replication-factor 1 \
+          --topic conflicts \
+          --config retention.ms=604800000
+
+        echo ''
+        echo 'Topics created successfully:'
+        kafka-topics --list --bootstrap-server kafka:9092
+      "
+    restart: "no"
+
+  # ===========================================================================
+  # Kafka UI (Development Tool)
+  # ===========================================================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: graph-updater-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+      - graph-updater-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - tools
+
+  # ===========================================================================
+  # Prometheus (Metrics Collection)
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: graph-updater-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - graph-updater-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # ===========================================================================
+  # Grafana (Dashboards)
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: graph-updater-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - graph-updater-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  graph-updater-network:
+    driver: bridge
+    name: graph-updater-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  neo4j_data:
+    name: graph-updater-neo4j-data
+  neo4j_logs:
+    name: graph-updater-neo4j-logs
+  neo4j_plugins:
+    name: graph-updater-neo4j-plugins
+  zookeeper_data:
+    name: graph-updater-zookeeper-data
+  zookeeper_logs:
+    name: graph-updater-zookeeper-logs
+  kafka_data:
+    name: graph-updater-kafka-data
+  prometheus_data:
+    name: graph-updater-prometheus-data
+  grafana_data:
+    name: graph-updater-grafana-data

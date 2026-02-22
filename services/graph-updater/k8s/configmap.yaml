@@ -1,0 +1,146 @@
+# =============================================================================
+# DocWeave Graph Updater Service - Kubernetes ConfigMap
+# =============================================================================
+# Non-sensitive configuration for the graph-updater service
+# Sensitive values should be stored in Secrets
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: graph-updater-config
+  namespace: docweave
+  labels:
+    app: graph-updater
+    app.kubernetes.io/name: graph-updater
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: docweave
+data:
+  # ==========================================================================
+  # Service Configuration
+  # ==========================================================================
+  SERVICE_NAME: "graph-updater"
+  SERVICE_PORT: "8004"
+  ENVIRONMENT: "production"
+
+  # ==========================================================================
+  # Logging Configuration
+  # ==========================================================================
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+
+  # ==========================================================================
+  # Neo4j Configuration
+  # ==========================================================================
+  NEO4J_URI: "bolt://neo4j.docweave.svc.cluster.local:7687"
+  NEO4J_USER: "neo4j"
+  NEO4J_DATABASE: "neo4j"
+  NEO4J_MAX_CONNECTION_POOL_SIZE: "50"
+  NEO4J_CONNECTION_TIMEOUT: "30"
+  NEO4J_MAX_TRANSACTION_RETRY_TIME: "30"
+
+  # ==========================================================================
+  # Kafka Configuration
+  # ==========================================================================
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.docweave.svc.cluster.local:9092"
+  KAFKA_TOPIC_EXTRACTED_CLAIMS: "extracted-claims"
+  KAFKA_TOPIC_GRAPH_UPDATES: "graph-updates"
+  KAFKA_TOPIC_CONFLICTS: "conflicts"
+  KAFKA_CONSUMER_GROUP_ID: "graph-updater"
+  KAFKA_AUTO_OFFSET_RESET: "earliest"
+  KAFKA_ENABLE_AUTO_COMMIT: "false"
+  KAFKA_MAX_POLL_RECORDS: "100"
+  KAFKA_SESSION_TIMEOUT_MS: "30000"
+  KAFKA_HEARTBEAT_INTERVAL_MS: "10000"
+
+  # ==========================================================================
+  # Conflict Detection Configuration
+  # ==========================================================================
+  CONFLICT_DETECTION_ENABLED: "true"
+  CONFLICT_AUTO_RESOLVE: "false"
+  CONFLICT_CONFIDENCE_THRESHOLD: "0.7"
+
+  # ==========================================================================
+  # Truth Layer Configuration
+  # ==========================================================================
+  TRUTH_CACHE_TTL_SECONDS: "300"
+  TRUTH_CACHE_MAX_SIZE: "10000"
+  TRUTH_MATERIALIZE_ON_UPDATE: "true"
+
+  # ==========================================================================
+  # Metrics Configuration
+  # ==========================================================================
+  METRICS_ENABLED: "true"
+  METRICS_PORT: "9090"
+  METRICS_PATH: "/metrics"
+
+  # ==========================================================================
+  # Health Check Configuration
+  # ==========================================================================
+  HEALTH_CHECK_TIMEOUT_SECONDS: "5"
+  READINESS_NEO4J_REQUIRED: "true"
+  READINESS_KAFKA_REQUIRED: "false"
+
+  # ==========================================================================
+  # Performance Tuning
+  # ==========================================================================
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  UVICORN_WORKERS: "1"
+  UVICORN_TIMEOUT_KEEP_ALIVE: "5"
+  UVICORN_LIMIT_MAX_REQUESTS: "10000"
+
+---
+# =============================================================================
+# Secrets Template (for reference - actual values in sealed-secrets or vault)
+# =============================================================================
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: graph-updater-secrets
+#   namespace: docweave
+# type: Opaque
+# data:
+#   neo4j-password: <base64-encoded-password>
+#   kafka-password: <base64-encoded-password>
+
+---
+# =============================================================================
+# Environment-specific ConfigMaps
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: graph-updater-config-staging
+  namespace: docweave-staging
+  labels:
+    app: graph-updater
+    environment: staging
+data:
+  ENVIRONMENT: "staging"
+  LOG_LEVEL: "DEBUG"
+  NEO4J_URI: "bolt://neo4j.docweave-staging.svc.cluster.local:7687"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.docweave-staging.svc.cluster.local:9092"
+  KAFKA_CONSUMER_GROUP_ID: "graph-updater-staging"
+  TRUTH_CACHE_TTL_SECONDS: "60"
+  CONFLICT_AUTO_RESOLVE: "true"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: graph-updater-config-production
+  namespace: docweave-production
+  labels:
+    app: graph-updater
+    environment: production
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  NEO4J_URI: "bolt://neo4j.docweave-production.svc.cluster.local:7687"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.docweave-production.svc.cluster.local:9092"
+  KAFKA_CONSUMER_GROUP_ID: "graph-updater-production"
+  TRUTH_CACHE_TTL_SECONDS: "300"
+  CONFLICT_AUTO_RESOLVE: "false"
+  # Production-specific performance settings
+  NEO4J_MAX_CONNECTION_POOL_SIZE: "100"
+  KAFKA_MAX_POLL_RECORDS: "500"

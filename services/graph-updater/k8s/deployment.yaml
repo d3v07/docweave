@@ -1,0 +1,213 @@
+# =============================================================================
+# DocWeave Graph Updater Service - Kubernetes Deployment
+# =============================================================================
+# This deployment includes:
+#   - Pod anti-affinity for high availability
+#   - Resource limits and requests
+#   - Liveness, readiness, and startup probes
+#   - Security context (non-root, read-only filesystem)
+#   - Environment configuration from ConfigMap and Secrets
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: graph-updater
+  namespace: docweave
+  labels:
+    app: graph-updater
+    app.kubernetes.io/name: graph-updater
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: docweave
+    app.kubernetes.io/version: "0.4.0"
+  annotations:
+    kubernetes.io/description: "DocWeave Graph Updater - Knowledge Graph and Conflict Resolution Service"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: graph-updater
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: graph-updater
+        app.kubernetes.io/name: graph-updater
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: docweave
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8004"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: graph-updater
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Pod Anti-Affinity: Spread pods across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - graph-updater
+                topologyKey: kubernetes.io/hostname
+        # Prefer nodes with SSD storage for Neo4j latency
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              preference:
+                matchExpressions:
+                  - key: node.kubernetes.io/instance-type
+                    operator: In
+                    values:
+                      - m5.large
+                      - m5.xlarge
+                      - m6i.large
+                      - m6i.xlarge
+
+      # Topology spread for zone distribution
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: graph-updater
+
+      containers:
+        - name: graph-updater
+          image: ghcr.io/docweave/docweave/graph-updater:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 8004
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          # Environment variables from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: graph-updater-config
+
+          # Sensitive environment variables from Secret
+          env:
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graph-updater-secrets
+                  key: neo4j-password
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graph-updater-secrets
+                  key: kafka-password
+                  optional: true
+
+          # Resource management
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          # Security context for container
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          # Volume mounts
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/.cache
+
+          # Startup probe - allow longer startup time
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30  # 150 seconds total startup time
+
+          # Liveness probe - is the container running?
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness probe - is the container ready to receive traffic?
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          lifecycle:
+            preStop:
+              exec:
+                # Graceful shutdown: stop accepting new requests
+                command:
+                  - "/bin/sh"
+                  - "-c"
+                  - "sleep 10"
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir:
+            sizeLimit: 100Mi
+
+      # Graceful termination
+      terminationGracePeriodSeconds: 60
+
+      # Image pull secrets for private registry
+      imagePullSecrets:
+        - name: ghcr-credentials
+
+---
+# =============================================================================
+# Service Account
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: graph-updater
+  namespace: docweave
+  labels:
+    app: graph-updater
+automountServiceAccountToken: false

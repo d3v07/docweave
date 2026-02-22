@@ -1,0 +1,18 @@
+# =============================================================================
+# Grafana Dashboard Provisioning
+# =============================================================================
+# Automatically load dashboards from the specified directory
+
+apiVersion: 1
+
+providers:
+  - name: 'DocWeave Dashboards'
+    orgId: 1
+    folder: 'DocWeave'
+    folderUid: 'docweave'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

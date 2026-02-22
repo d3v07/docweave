@@ -1,0 +1,94 @@
+# =============================================================================
+# Prometheus Configuration for Graph Updater Service
+# =============================================================================
+# This configuration is optimized for local development with docker-compose.
+# For production Kubernetes deployments, use the PodMonitor/ServiceMonitor CRDs.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'graph-updater-monitor'
+    environment: 'development'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - alertmanager:9093
+
+# Rule files for alerting
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# Scrape configurations
+scrape_configs:
+  # ==========================================================================
+  # Prometheus self-monitoring
+  # ==========================================================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # ==========================================================================
+  # Graph Updater Service Metrics
+  # ==========================================================================
+  - job_name: 'graph-updater'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['graph-updater:8004']
+        labels:
+          service: 'graph-updater'
+          environment: 'development'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+):\d+'
+        replacement: '${1}'
+
+  # ==========================================================================
+  # Neo4j Metrics (if Neo4j Prometheus endpoint is enabled)
+  # ==========================================================================
+  - job_name: 'neo4j'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['neo4j:2004']
+        labels:
+          service: 'neo4j'
+          environment: 'development'
+    # Neo4j metrics are optional - don't fail if unavailable
+    honor_labels: true
+    scrape_timeout: 10s
+
+  # ==========================================================================
+  # Kafka Metrics via JMX Exporter (if configured)
+  # ==========================================================================
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9308']
+        labels:
+          service: 'kafka'
+          environment: 'development'
+    # Kafka JMX metrics are optional
+    honor_labels: true
+    scrape_timeout: 10s
+
+  # ==========================================================================
+  # Docker Daemon Metrics (if exposed)
+  # ==========================================================================
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['host.docker.internal:9323']
+        labels:
+          service: 'docker'
+    # Optional - only works if Docker daemon exposes metrics
+    honor_labels: true
+    scrape_timeout: 5s
+
+# =============================================================================
+# Recording Rules for Pre-computed Metrics
+# =============================================================================
+# These can be loaded from separate files or defined inline

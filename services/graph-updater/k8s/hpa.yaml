@@ -1,0 +1,247 @@
+# =============================================================================
+# DocWeave Graph Updater Service - Horizontal Pod Autoscaler
+# =============================================================================
+# Automatically scales the graph-updater deployment based on:
+#   - CPU utilization
+#   - Memory utilization
+#   - Custom metrics (Kafka consumer lag, request rate)
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: graph-updater-hpa
+  namespace: docweave
+  labels:
+    app: graph-updater
+    app.kubernetes.io/name: graph-updater
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: docweave
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: graph-updater
+
+  # Replica bounds
+  minReplicas: 2
+  maxReplicas: 10
+
+  # Scaling metrics
+  metrics:
+    # CPU-based scaling
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Memory-based scaling
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+    # Custom metric: HTTP requests per second (from Prometheus)
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "100"
+
+    # Custom metric: Kafka consumer lag
+    # Requires prometheus-adapter configured with kafka metrics
+    - type: External
+      external:
+        metric:
+          name: kafka_consumergroup_lag
+          selector:
+            matchLabels:
+              consumergroup: graph-updater
+              topic: extracted-claims
+        target:
+          type: AverageValue
+          averageValue: "1000"
+
+  # Scaling behavior for fine-grained control
+  behavior:
+    # Scale up behavior
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        # Allow rapid scale-up for traffic spikes
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+      selectPolicy: Max
+
+    # Scale down behavior
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        # Gradual scale-down to prevent oscillation
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+        - type: Percent
+          value: 10
+          periodSeconds: 120
+      selectPolicy: Min
+
+---
+# =============================================================================
+# Vertical Pod Autoscaler (VPA) - Resource recommendation
+# =============================================================================
+# Note: VPA and HPA should not target the same metrics (CPU/memory)
+# This VPA is set to "Off" mode for recommendations only
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: graph-updater-vpa
+  namespace: docweave
+  labels:
+    app: graph-updater
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: graph-updater
+  updatePolicy:
+    # "Off" = recommendations only, no automatic updates
+    # "Auto" = automatic updates (use with caution)
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: graph-updater
+        minAllowed:
+          cpu: "100m"
+          memory: "256Mi"
+        maxAllowed:
+          cpu: "4"
+          memory: "4Gi"
+        controlledResources: ["cpu", "memory"]
+        controlledValues: RequestsAndLimits
+
+---
+# =============================================================================
+# PodMonitor for Prometheus Operator (Custom Metrics)
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: graph-updater
+  namespace: docweave
+  labels:
+    app: graph-updater
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: graph-updater
+  namespaceSelector:
+    matchNames:
+      - docweave
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+
+---
+# =============================================================================
+# PrometheusRule for Alerting
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: graph-updater-alerts
+  namespace: docweave
+  labels:
+    app: graph-updater
+    release: prometheus
+spec:
+  groups:
+    - name: graph-updater
+      rules:
+        # High error rate alert
+        - alert: GraphUpdaterHighErrorRate
+          expr: |
+            sum(rate(docweave_graph_updater_errors_total[5m]))
+            / sum(rate(docweave_graph_updater_claims_processed_total[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            service: graph-updater
+          annotations:
+            summary: "High error rate in graph-updater"
+            description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+        # Pod availability alert
+        - alert: GraphUpdaterPodUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{deployment="graph-updater"}
+            < kube_deployment_spec_replicas{deployment="graph-updater"}
+          for: 5m
+          labels:
+            severity: warning
+            service: graph-updater
+          annotations:
+            summary: "Graph-updater pods unavailable"
+            description: "{{ $value }} pods are unavailable"
+
+        # High memory usage alert
+        - alert: GraphUpdaterHighMemoryUsage
+          expr: |
+            container_memory_usage_bytes{container="graph-updater"}
+            / container_spec_memory_limit_bytes{container="graph-updater"} > 0.9
+          for: 10m
+          labels:
+            severity: warning
+            service: graph-updater
+          annotations:
+            summary: "High memory usage in graph-updater"
+            description: "Memory usage is {{ $value | humanizePercentage }}"
+
+        # Kafka consumer lag alert
+        - alert: GraphUpdaterKafkaLag
+          expr: |
+            kafka_consumergroup_lag{consumergroup="graph-updater", topic="extracted-claims"} > 10000
+          for: 10m
+          labels:
+            severity: warning
+            service: graph-updater
+          annotations:
+            summary: "High Kafka consumer lag"
+            description: "Consumer lag is {{ $value }} messages"
+
+        # Neo4j connection issues
+        - alert: GraphUpdaterNeo4jUnhealthy
+          expr: |
+            docweave_graph_updater_neo4j_healthy == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: graph-updater
+          annotations:
+            summary: "Neo4j connection unhealthy"
+            description: "Graph-updater cannot connect to Neo4j"
+
+        # Conflict resolution backlog
+        - alert: GraphUpdaterConflictBacklog
+          expr: |
+            docweave_graph_updater_conflicts_detected_total - docweave_graph_updater_conflicts_resolved_total > 100
+          for: 30m
+          labels:
+            severity: warning
+            service: graph-updater
+          annotations:
+            summary: "High unresolved conflict backlog"
+            description: "{{ $value }} conflicts pending resolution"

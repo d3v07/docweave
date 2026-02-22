@@ -1,0 +1,156 @@
+# =============================================================================
+# DocWeave Graph Updater Service - Kubernetes Service
+# =============================================================================
+# Exposes the graph-updater deployment within the cluster
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: graph-updater
+  namespace: docweave
+  labels:
+    app: graph-updater
+    app.kubernetes.io/name: graph-updater
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: docweave
+  annotations:
+    # Prometheus service discovery
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8004"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: graph-updater
+  ports:
+    - name: http
+      port: 8004
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  sessionAffinity: None
+
+---
+# =============================================================================
+# Headless Service for StatefulSet-like behavior (if needed)
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: graph-updater-headless
+  namespace: docweave
+  labels:
+    app: graph-updater
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: graph-updater
+  ports:
+    - name: http
+      port: 8004
+      targetPort: http
+      protocol: TCP
+
+---
+# =============================================================================
+# Network Policy - Restrict ingress/egress traffic
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: graph-updater-network-policy
+  namespace: docweave
+  labels:
+    app: graph-updater
+spec:
+  podSelector:
+    matchLabels:
+      app: graph-updater
+  policyTypes:
+    - Ingress
+    - Egress
+
+  # Ingress rules
+  ingress:
+    # Allow traffic from other DocWeave services
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: docweave
+      ports:
+        - protocol: TCP
+          port: 8004
+    # Allow traffic from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8004
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8004
+        - protocol: TCP
+          port: 9090
+
+  # Egress rules
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow Neo4j connections
+    - to:
+        - podSelector:
+            matchLabels:
+              app: neo4j
+      ports:
+        - protocol: TCP
+          port: 7687
+    # Allow Kafka connections
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    # Allow connections to other DocWeave services
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: docweave
+
+---
+# =============================================================================
+# Pod Disruption Budget - Maintain availability during updates
+# =============================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: graph-updater-pdb
+  namespace: docweave
+  labels:
+    app: graph-updater
+spec:
+  selector:
+    matchLabels:
+      app: graph-updater
+  # Ensure at least 1 pod is always available
+  minAvailable: 1
+  # Alternative: maxUnavailable: 1

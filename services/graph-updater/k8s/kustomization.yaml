@@ -1,0 +1,43 @@
+# =============================================================================
+# Kustomize Configuration for Graph Updater Service
+# =============================================================================
+# Usage:
+#   kubectl apply -k k8s/                    # Apply all resources
+#   kubectl apply -k k8s/overlays/staging    # Apply staging overlay
+#   kubectl apply -k k8s/overlays/production # Apply production overlay
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Common labels for all resources
+commonLabels:
+  app.kubernetes.io/name: graph-updater
+  app.kubernetes.io/component: backend
+  app.kubernetes.io/part-of: docweave
+  app.kubernetes.io/managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  app.kubernetes.io/version: "0.4.0"
+
+# Namespace for all resources
+namespace: docweave
+
+# Resources to include
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+  - hpa.yaml
+
+# ConfigMap generator (alternative to static configmap.yaml)
+# configMapGenerator:
+#   - name: graph-updater-config
+#     literals:
+#       - SERVICE_NAME=graph-updater
+#       - SERVICE_PORT=8004
+
+# Image customization
+images:
+  - name: ghcr.io/docweave/docweave/graph-updater
+    newTag: latest
