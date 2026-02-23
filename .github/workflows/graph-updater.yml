@@ -189,8 +189,8 @@ jobs:
 
       - name: Run Bandit security scan
         run: |
-          bandit -r services/graph-updater/ -f json -o bandit-results.json || true
-          bandit -r services/graph-updater/ -f txt
+          bandit -r services/graph-updater/ -f json -o bandit-results.json --exit-zero
+          bandit -r services/graph-updater/ -f txt --exit-zero
 
       - name: Check dependencies for vulnerabilities
         run: |
