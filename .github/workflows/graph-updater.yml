@@ -80,9 +80,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r services/graph-updater/requirements.txt
-          pip install pytest pytest-asyncio pytest-cov pytest-xdist coverage
+          pip install pytest pytest-asyncio
 
-      - name: Run tests with coverage
+      - name: Run tests
         env:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
@@ -91,31 +91,9 @@ jobs:
         run: |
           pytest services/graph-updater/tests/test_graph_updater.py \
             --noconftest \
+            --import-mode=importlib \
             -v \
             --tb=short
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: graph-updater
-          name: graph-updater-coverage
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage-html/
-          retention-days: 7
-
-      - name: Coverage Summary
-        run: |
-          echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          coverage report --format=markdown >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
   # Lint Job - Code quality checks
