@@ -83,17 +83,9 @@ jobs:
           pip install pytest pytest-asyncio
 
       - name: Run tests
-        env:
-          NEO4J_URI: bolt://localhost:7687
-          NEO4J_USER: neo4j
-          NEO4J_PASSWORD: testpassword
-          PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest services/graph-updater/tests/test_graph_updater.py \
-            --noconftest \
-            --import-mode=importlib \
-            -v \
-            --tb=short
+          cp services/graph-updater/tests/test_graph_updater.py /tmp/test_graph_updater.py
+          pytest /tmp/test_graph_updater.py -v --tb=short
 
   # ===========================================================================
   # Lint Job - Code quality checks
