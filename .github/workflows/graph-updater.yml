@@ -181,6 +181,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     outputs:
       image_tag: ${{ steps.meta.outputs.tags }}
