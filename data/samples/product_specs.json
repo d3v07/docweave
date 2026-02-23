@@ -1,0 +1,67 @@
+{
+  "product": {
+    "name": "Widget Pro",
+    "version": "2.0",
+    "sku": "WP-2024-PRO",
+    "category": "Enterprise Software",
+    "manufacturer": "Acme Corporation"
+  },
+  "pricing": {
+    "individual": {
+      "price": 299,
+      "currency": "USD",
+      "billing": "one-time"
+    },
+    "team": {
+      "price": 49,
+      "currency": "USD",
+      "billing": "per-user-monthly",
+      "minimum_seats": 5
+    },
+    "enterprise": {
+      "price": "custom",
+      "billing": "annual",
+      "minimum_seats": 100
+    }
+  },
+  "features": [
+    {
+      "name": "AI Automation",
+      "description": "Intelligent workflow automation powered by machine learning",
+      "tier": ["individual", "team", "enterprise"]
+    },
+    {
+      "name": "Real-time Collaboration",
+      "description": "Simultaneous editing with presence indicators",
+      "tier": ["team", "enterprise"]
+    },
+    {
+      "name": "Advanced Analytics",
+      "description": "Custom dashboards and reporting",
+      "tier": ["enterprise"]
+    },
+    {
+      "name": "SSO Integration",
+      "description": "SAML 2.0 and OAuth support",
+      "tier": ["enterprise"]
+    }
+  ],
+  "technical_specs": {
+    "platforms": ["Windows", "macOS", "Linux", "Web", "iOS", "Android"],
+    "minimum_requirements": {
+      "cpu": "2 GHz dual-core",
+      "ram": "4 GB",
+      "storage": "500 MB"
+    },
+    "api": {
+      "type": "REST",
+      "authentication": "OAuth 2.0",
+      "rate_limit": "1000 requests/hour"
+    }
+  },
+  "release": {
+    "launch_date": "2024-02-15",
+    "general_availability": "2024-03-01",
+    "support_end": "2027-02-15"
+  }
+}
