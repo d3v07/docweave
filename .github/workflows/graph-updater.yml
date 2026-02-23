@@ -90,11 +90,6 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pytest services/graph-updater/tests/test_graph_updater.py \
-            --cov=services/graph-updater \
-            --cov-report=xml:coverage.xml \
-            --cov-report=html:coverage-html \
-            --cov-report=term-missing \
-            --cov-fail-under=0 \
             -v \
             --tb=short
 
