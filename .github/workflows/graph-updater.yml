@@ -90,6 +90,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pytest services/graph-updater/tests/test_graph_updater.py \
+            --noconftest \
             -v \
             --tb=short
 
