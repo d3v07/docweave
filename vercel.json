@@ -1,0 +1,6 @@
+{
+  "buildCommand": "cd services/graph-updater/dashboard && npm install && npm run build",
+  "outputDirectory": "services/graph-updater/dashboard/.next",
+  "framework": "nextjs",
+  "installCommand": "cd services/graph-updater/dashboard && npm install"
+}
