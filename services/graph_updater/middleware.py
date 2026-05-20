@@ -147,11 +147,7 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                 status_code=500,
                 content={
                     "error": "Internal Server Error",
-                    "message": (
-                        str(e)
-                        if not isinstance(e, Exception)
-                        else "An unexpected error occurred"
-                    ),
+                    "message": "An unexpected error occurred",
                     "correlation_id": correlation_id,
                     "timestamp": datetime.utcnow().isoformat(),
                 },
