@@ -12,6 +12,7 @@ COPY services/parser/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/parser /app/services/parser
+COPY services/ingestion /app/services/ingestion
 
 ENV PYTHONPATH=/app
 EXPOSE 8002

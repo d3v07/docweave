@@ -25,61 +25,61 @@ Components:
     - models.py: Additional Pydantic models
 """
 
-from services.graph_updater.operations import (
-    GraphOperations,
-    EntityMergeRequest,
-    EntityMergeResult,
-    ClaimVersionInfo,
-)
 from services.graph_updater.conflict_detector import (
     ConflictDetector,
     ConflictDetectorConfig,
-    ConflictType,
     ConflictSeverity,
+    ConflictType,
     DetectedConflict,
 )
 from services.graph_updater.conflict_resolver import (
     ConflictResolver,
     ConflictResolverConfig,
-    ResolutionStrategy,
+    ResolutionAuditEntry,
     ResolutionOutcome,
     ResolutionResult,
-    ResolutionAuditEntry,
-)
-from services.graph_updater.truth_layer import (
-    TruthLayer,
-    TruthLayerConfig,
-    TruthValue,
-    EntityTruth,
-    HistoricalTruth,
+    ResolutionStrategy,
 )
 from services.graph_updater.consumer import (
+    ClaimProcessor,
     ClaimsConsumer,
     GraphUpdateConsumer,
-    ClaimProcessor,
-)
-from services.graph_updater.health import (
-    HealthChecker,
-    HealthStatus,
-    ComponentHealth,
-    ServiceHealth,
-    MetricsCollector,
 )
 from services.graph_updater.exceptions import (
-    GraphUpdaterError,
-    EntityError,
-    EntityNotFoundError,
-    EntityMergeError,
     ClaimError,
     ClaimNotFoundError,
     ClaimValidationError,
+    ConflictAlreadyResolvedError,
     ConflictError,
     ConflictNotFoundError,
-    ConflictAlreadyResolvedError,
+    DatabaseError,
+    EntityError,
+    EntityMergeError,
+    EntityNotFoundError,
+    GraphUpdaterError,
+    Neo4jConnectionError,
     TruthLayerError,
     TruthNotFoundError,
-    DatabaseError,
-    Neo4jConnectionError,
+)
+from services.graph_updater.health import (
+    ComponentHealth,
+    HealthChecker,
+    HealthStatus,
+    MetricsCollector,
+    ServiceHealth,
+)
+from services.graph_updater.operations import (
+    ClaimVersionInfo,
+    EntityMergeRequest,
+    EntityMergeResult,
+    GraphOperations,
+)
+from services.graph_updater.truth_layer import (
+    EntityTruth,
+    HistoricalTruth,
+    TruthLayer,
+    TruthLayerConfig,
+    TruthValue,
 )
 
 __version__ = "0.4.0"

@@ -21,74 +21,77 @@ API Endpoints:
 
 import asyncio
 import logging
-import os
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional, Union
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from shared.config.settings import settings, get_settings
-
-# Security imports - OWASP best practices
-from services.graph_updater.security import (
-    SecurityConfig,
-    SecurityHeadersMiddleware,
-    RateLimitMiddleware,
-    InputSanitizer,
-    verify_admin_api_key,
-    SecureClaimRequest,
-    SecureBatchClaimRequest,
-    SecureEntityMergeRequest,
-    SecureResolveConflictRequest,
-)
-from shared.utils.neo4j_client import Neo4jClient
-
-from services.graph_updater.operations import (
-    GraphOperations,
-    EntityMergeRequest,
-    EntityMergeResult,
-    ClaimVersionInfo,
-)
 from services.graph_updater.conflict_detector import (
     ConflictDetector,
     ConflictDetectorConfig,
     ConflictType,
-    DetectedConflict,
 )
 from services.graph_updater.conflict_resolver import (
     ConflictResolver,
     ConflictResolverConfig,
     ResolutionStrategy,
-    ResolutionResult,
-    ManualResolutionRequest,
-    AutoResolutionRequest,
-)
-from services.graph_updater.truth_layer import (
-    TruthLayer,
-    TruthLayerConfig,
-    EntityTruth,
-    TruthValue,
 )
 from services.graph_updater.consumer import ClaimsConsumer, GraphUpdateConsumer
+from services.graph_updater.operations import (
+    ClaimVersionInfo,
+    EntityMergeRequest,
+    EntityMergeResult,
+    GraphOperations,
+)
+
+# Security imports - OWASP best practices
+from services.graph_updater.security import (
+    InputSanitizer,
+    RateLimitMiddleware,
+    SecurityConfig,
+    SecurityHeadersMiddleware,
+    verify_admin_api_key,
+)
+from services.graph_updater.truth_layer import TruthLayer, TruthLayerConfig
+from shared.utils.neo4j_client import Neo4jClient
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def serialize_timestamp(value: Any) -> str:
+    """Return a JSON-friendly timestamp string."""
+    if value is None:
+        return datetime.utcnow().isoformat()
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    iso_format = getattr(value, "iso_format", None)
+    if callable(iso_format):
+        return iso_format()
+
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+
+    return str(value)
 
 
 # =============================================================================
 # Request/Response Models
 # =============================================================================
 
+
 class HealthResponse(BaseModel):
     """Health check response."""
+
     status: str
     service: str
     timestamp: str
@@ -97,6 +100,7 @@ class HealthResponse(BaseModel):
 
 class ReadinessResponse(BaseModel):
     """Readiness check response."""
+
     ready: bool
     checks: dict[str, Union[bool, str]]
     timestamp: str
@@ -108,33 +112,29 @@ class ClaimRequest(BaseModel):
 
     Security: All fields have strict validation to prevent injection attacks.
     """
+
     subject_entity_id: str = Field(
         ...,
         min_length=1,
         max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]+$',
-        description="Entity ID (alphanumeric with underscores/hyphens)"
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="Entity ID (alphanumeric with underscores/hyphens)",
     )
     predicate: str = Field(
         ...,
         min_length=1,
         max_length=200,
-        pattern=r'^[a-zA-Z][a-zA-Z0-9_]*$',
-        description="Predicate in snake_case format"
+        pattern=r"^[a-zA-Z][a-zA-Z0-9_]*$",
+        description="Predicate in snake_case format",
     )
     object_value: Any
     source_id: str = Field(
-        ...,
-        min_length=1,
-        max_length=200,
-        description="Source document ID"
+        ..., min_length=1, max_length=200, description="Source document ID"
     )
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     extracted_text: Optional[str] = Field(default=None, max_length=10000)
     object_entity_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]*$'
+        default=None, max_length=100, pattern=r"^[a-zA-Z0-9_-]*$"
     )
     valid_from: Optional[datetime] = None
     valid_until: Optional[datetime] = None
@@ -143,7 +143,7 @@ class ClaimRequest(BaseModel):
 
     model_config = {"extra": "forbid"}  # Reject unexpected fields
 
-    @field_validator('object_value')
+    @field_validator("object_value")
     @classmethod
     def validate_object_value(cls, v: Any) -> Any:
         """Validate object value to prevent injection."""
@@ -154,6 +154,7 @@ class ClaimRequest(BaseModel):
 
 class ClaimResponse(BaseModel):
     """Response after adding a claim."""
+
     claim_id: str
     status: str
     conflicts_detected: int
@@ -163,6 +164,7 @@ class ClaimResponse(BaseModel):
 
 class EntityTruthResponse(BaseModel):
     """Response containing entity truth."""
+
     entity_id: str
     entity_name: str
     entity_type: str
@@ -174,6 +176,7 @@ class EntityTruthResponse(BaseModel):
 
 class HistoryResponse(BaseModel):
     """Response containing claim history."""
+
     entity_id: str
     predicate: str
     history: list[dict[str, Any]]
@@ -182,6 +185,7 @@ class HistoryResponse(BaseModel):
 
 class ConflictListResponse(BaseModel):
     """Response containing list of conflicts."""
+
     conflicts: list[dict[str, Any]]
     total: int
     has_more: bool
@@ -193,17 +197,14 @@ class ResolveConflictRequest(BaseModel):
 
     Security: Strict validation on all inputs.
     """
+
     strategy: Optional[ResolutionStrategy] = None
     winning_claim_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]*$'
+        default=None, max_length=100, pattern=r"^[a-zA-Z0-9_-]*$"
     )
     reason: Optional[str] = Field(default=None, max_length=2000)
     resolved_by: str = Field(
-        default="api_user",
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]+$'
+        default="api_user", max_length=100, pattern=r"^[a-zA-Z0-9_-]+$"
     )
     force: bool = Field(default=False)
 
@@ -212,6 +213,7 @@ class ResolveConflictRequest(BaseModel):
 
 class ResolveConflictResponse(BaseModel):
     """Response after resolving a conflict."""
+
     conflict_id: str
     outcome: str
     winning_claim_id: Optional[str]
@@ -224,6 +226,7 @@ class ResolveConflictResponse(BaseModel):
 
 class AuditTrailResponse(BaseModel):
     """Response containing audit trail."""
+
     conflict_id: str
     entries: list[dict[str, Any]]
     total_entries: int
@@ -231,12 +234,14 @@ class AuditTrailResponse(BaseModel):
 
 class ConsumerStatsResponse(BaseModel):
     """Response containing consumer statistics."""
+
     claims_consumer: dict[str, Any]
     updates_consumer: Optional[dict[str, Any]]
 
 
 class EntitySearchResponse(BaseModel):
     """Response containing entity search results."""
+
     entities: list[dict[str, Any]]
     total: int
     has_more: bool
@@ -244,6 +249,7 @@ class EntitySearchResponse(BaseModel):
 
 class EntityGraphResponse(BaseModel):
     """Response containing entity graph data."""
+
     center_entity_id: str
     entities: list[dict[str, Any]]
     relationships: list[dict[str, Any]]
@@ -252,6 +258,7 @@ class EntityGraphResponse(BaseModel):
 
 class GraphStatsResponse(BaseModel):
     """Response containing graph statistics."""
+
     entity_count: int
     claim_count: int
     source_count: int
@@ -267,17 +274,16 @@ class BatchClaimRequest(BaseModel):
 
     Security: Limited batch size to prevent DoS.
     """
+
     claims: list[dict[str, Any]] = Field(
         ...,
         max_length=100,  # Max 100 claims per batch to prevent DoS
-        description="List of claims (max 100 per batch)"
+        description="List of claims (max 100 per batch)",
     )
     check_conflicts: bool = Field(default=True)
     auto_resolve: bool = Field(default=False)
     resolution_strategy: Optional[str] = Field(
-        default=None,
-        max_length=50,
-        pattern=r'^[a-z_]*$'
+        default=None, max_length=50, pattern=r"^[a-z_]*$"
     )
     source_id: Optional[str] = Field(default=None, max_length=200)
 
@@ -286,6 +292,7 @@ class BatchClaimRequest(BaseModel):
 
 class BatchClaimResponse(BaseModel):
     """Response after adding batch claims."""
+
     total_claims: int
     successful: int
     failed: int
@@ -311,6 +318,7 @@ updates_consumer: Optional[GraphUpdateConsumer] = None
 # =============================================================================
 # Application Lifecycle
 # =============================================================================
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -454,6 +462,7 @@ app.add_middleware(
 # Health Endpoints
 # =============================================================================
 
+
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """Check service health."""
@@ -500,10 +509,11 @@ async def readiness_check():
 # Entity Endpoints
 # =============================================================================
 
+
 @app.post("/entity", tags=["Entities"])
 async def create_entity(
     name: str = Query(..., min_length=1, max_length=500),
-    entity_type: str = Query(..., min_length=1, max_length=100, pattern=r'^[A-Z_]+$'),
+    entity_type: str = Query(..., min_length=1, max_length=100, pattern=r"^[A-Z_]+$"),
     aliases: Optional[list[str]] = Query(default=None, max_length=50),
 ):
     """
@@ -526,6 +536,7 @@ async def create_entity(
     entity_id = await graph_ops.merge_entity(name, entity_type, sanitized_aliases)
     return {
         "id": entity_id,
+        "entity_id": entity_id,
         "name": name,
         "type": entity_type,
         "aliases": sanitized_aliases,
@@ -537,7 +548,9 @@ async def create_entity(
 @app.get("/entity/search", tags=["Entities"])
 async def search_entities(
     query: str = Query(default="*", max_length=1000),
-    entity_type: Optional[str] = Query(default=None, max_length=100, pattern=r'^[a-zA-Z_]*$'),
+    entity_type: Optional[str] = Query(
+        default=None, max_length=100, pattern=r"^[a-zA-Z_]*$"
+    ),
     include_merged: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=10000),
@@ -567,7 +580,7 @@ async def search_entities(
         cypher_query = """
         MATCH (e:Entity)
         WHERE ($entity_type IS NULL OR e.type = $entity_type)
-        AND ($include_merged = true OR NOT exists(e.merged_into))
+        AND ($include_merged = true OR e.merged_into IS NULL)
         RETURN e.id as id, e.name as name, e.type as type,
                e.aliases as aliases, e.created_at as created_at,
                e.updated_at as updated_at
@@ -582,7 +595,7 @@ async def search_entities(
         WHERE (toLower(e.name) CONTAINS toLower($query)
                OR any(alias IN e.aliases WHERE toLower(alias) CONTAINS toLower($query)))
         AND ($entity_type IS NULL OR e.type = $entity_type)
-        AND ($include_merged = true OR NOT exists(e.merged_into))
+        AND ($include_merged = true OR e.merged_into IS NULL)
         RETURN e.id as id, e.name as name, e.type as type,
                e.aliases as aliases, e.created_at as created_at,
                e.updated_at as updated_at
@@ -603,14 +616,16 @@ async def search_entities(
 
     entities = []
     for record in result.records[:limit]:
-        entities.append({
-            "id": record.get("id"),
-            "name": record.get("name"),
-            "type": record.get("type"),
-            "aliases": record.get("aliases") or [],
-            "created_at": record.get("created_at", datetime.utcnow().isoformat()),
-            "updated_at": record.get("updated_at", datetime.utcnow().isoformat()),
-        })
+        entities.append(
+            {
+                "id": record.get("id"),
+                "name": record.get("name"),
+                "type": record.get("type"),
+                "aliases": record.get("aliases") or [],
+                "created_at": serialize_timestamp(record.get("created_at")),
+                "updated_at": serialize_timestamp(record.get("updated_at")),
+            }
+        )
 
     has_more = len(result.records) > limit
 
@@ -620,14 +635,17 @@ async def search_entities(
     WHERE ($query = '*' OR toLower(e.name) CONTAINS toLower($query)
            OR any(alias IN e.aliases WHERE toLower(alias) CONTAINS toLower($query)))
     AND ($entity_type IS NULL OR e.type = $entity_type)
-    AND ($include_merged = true OR NOT exists(e.merged_into))
+    AND ($include_merged = true OR e.merged_into IS NULL)
     RETURN count(e) as total
     """
-    count_result = await neo4j_client.execute_query(count_query, {
-        "query": query,
-        "entity_type": entity_type,
-        "include_merged": include_merged,
-    })
+    count_result = await neo4j_client.execute_query(
+        count_query,
+        {
+            "query": query,
+            "entity_type": entity_type,
+            "include_merged": include_merged,
+        },
+    )
     total = count_result.records[0].get("total", 0) if count_result.records else 0
 
     return {
@@ -662,14 +680,19 @@ async def get_entity_graph(
            e.aliases as aliases, e.created_at as created_at,
            e.updated_at as updated_at
     """
-    center_result = await neo4j_client.execute_query(center_query, {"entity_id": entity_id})
+    center_result = await neo4j_client.execute_query(
+        center_query, {"entity_id": entity_id}
+    )
 
     if not center_result.records:
         raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 
     # Get related entities and relationships up to depth
-    graph_query = """
-    MATCH path = (center:Entity {id: $entity_id})-[r*1..""" + str(depth) + """]-(related:Entity)
+    graph_query = (
+        """
+    MATCH path = (center:Entity {id: $entity_id})-[r*1.."""
+        + str(depth)
+        + """]-(related:Entity)
     WITH center, related, relationships(path) as rels
     UNWIND rels as rel
     WITH center, related, rel
@@ -685,8 +708,11 @@ async def get_entity_graph(
         COALESCE(rel.claim_ids, []) as claim_ids
     LIMIT 100
     """
+    )
 
-    graph_result = await neo4j_client.execute_query(graph_query, {"entity_id": entity_id})
+    graph_result = await neo4j_client.execute_query(
+        graph_query, {"entity_id": entity_id}
+    )
 
     # Build entities set and relationships list
     entities_map = {}
@@ -699,8 +725,8 @@ async def get_entity_graph(
         "name": center_record.get("name"),
         "type": center_record.get("type"),
         "aliases": center_record.get("aliases") or [],
-        "created_at": center_record.get("created_at", datetime.utcnow().isoformat()),
-        "updated_at": center_record.get("updated_at", datetime.utcnow().isoformat()),
+        "created_at": serialize_timestamp(center_record.get("created_at")),
+        "updated_at": serialize_timestamp(center_record.get("updated_at")),
     }
 
     # Process graph results
@@ -714,8 +740,8 @@ async def get_entity_graph(
                 "name": record.get("entity_name"),
                 "type": record.get("entity_type"),
                 "aliases": record.get("aliases") or [],
-                "created_at": record.get("created_at", datetime.utcnow().isoformat()),
-                "updated_at": record.get("updated_at", datetime.utcnow().isoformat()),
+                "created_at": serialize_timestamp(record.get("created_at")),
+                "updated_at": serialize_timestamp(record.get("updated_at")),
             }
 
         # Add relationship
@@ -727,14 +753,16 @@ async def get_entity_graph(
             rel_key = f"{source_id}-{rel_type}-{target_id}"
             if rel_key not in seen_relationships:
                 seen_relationships.add(rel_key)
-                relationships.append({
-                    "source_entity_id": source_id,
-                    "target_entity_id": target_id,
-                    "relationship_type": rel_type,
-                    "predicate": record.get("predicate", rel_type),
-                    "confidence": record.get("confidence", 1.0),
-                    "claim_ids": record.get("claim_ids", []),
-                })
+                relationships.append(
+                    {
+                        "source_entity_id": source_id,
+                        "target_entity_id": target_id,
+                        "relationship_type": rel_type,
+                        "predicate": record.get("predicate", rel_type),
+                        "confidence": record.get("confidence", 1.0),
+                        "claim_ids": record.get("claim_ids", []),
+                    }
+                )
 
     return {
         "center_entity_id": entity_id,
@@ -772,7 +800,9 @@ async def merge_entities(request: EntityMergeRequest):
     return result
 
 
-@app.get("/entity/{entity_id}/truth", response_model=EntityTruthResponse, tags=["Truth"])
+@app.get(
+    "/entity/{entity_id}/truth", response_model=EntityTruthResponse, tags=["Truth"]
+)
 async def get_entity_truth(entity_id: str):
     """
     Get the current truth for an entity.
@@ -807,7 +837,7 @@ async def get_entity_truth(entity_id: str):
 @app.get("/entity/{entity_id}/history", response_model=HistoryResponse, tags=["Truth"])
 async def get_entity_history(
     entity_id: str,
-    predicate: str = Query(..., max_length=200, pattern=r'^[a-zA-Z][a-zA-Z0-9_]*$'),
+    predicate: str = Query(..., max_length=200, pattern=r"^[a-zA-Z][a-zA-Z0-9_]*$"),
     include_superseded: bool = Query(default=True),
 ):
     """
@@ -825,7 +855,9 @@ async def get_entity_history(
     if not graph_ops:
         raise HTTPException(status_code=503, detail="Graph operations not available")
 
-    history = await graph_ops.get_claim_history(entity_id, predicate, include_superseded)
+    history = await graph_ops.get_claim_history(
+        entity_id, predicate, include_superseded
+    )
     versions = await graph_ops.get_claim_versions(entity_id, predicate)
 
     return HistoryResponse(
@@ -855,7 +887,7 @@ async def get_truth_at_time(
     if not historical:
         raise HTTPException(
             status_code=404,
-            detail=f"No truth found for {entity_id}.{predicate} at {as_of}"
+            detail=f"No truth found for {entity_id}.{predicate} at {as_of}",
         )
 
     return historical.to_dict()
@@ -864,6 +896,7 @@ async def get_truth_at_time(
 # =============================================================================
 # Claim Endpoints
 # =============================================================================
+
 
 @app.post("/claim", response_model=ClaimResponse, tags=["Claims"])
 async def add_claim(request: ClaimRequest):
@@ -876,8 +909,8 @@ async def add_claim(request: ClaimRequest):
     if not graph_ops:
         raise HTTPException(status_code=503, detail="Graph operations not available")
 
-    conflicts = []
-    superseded_claims = []
+    conflicts: list[dict[str, Any]] = []
+    superseded_claims: list[str] = []
     claim_id = ""
 
     if request.auto_supersede:
@@ -940,7 +973,7 @@ async def get_claim(claim_id: str):
     Security: Claim ID is validated.
     """
     # Validate claim_id format
-    if not re.match(r'^[a-zA-Z0-9_-]+$', claim_id) or len(claim_id) > 100:
+    if not re.match(r"^[a-zA-Z0-9_-]+$", claim_id) or len(claim_id) > 100:
         raise HTTPException(status_code=400, detail="Invalid claim ID format")
 
     if not neo4j_client:
@@ -973,6 +1006,7 @@ async def add_batch_claims(request: BatchClaimRequest):
     Optionally checks for conflicts and can auto-resolve using the specified strategy.
     """
     import time
+
     start_time = time.time()
 
     if not graph_ops:
@@ -994,25 +1028,32 @@ async def add_batch_claims(request: BatchClaimRequest):
                 continue
 
             # Validate required fields
-            subject_entity_id = claim_data.get("subject_entity_id")
-            predicate = claim_data.get("predicate")
+            raw_subject_entity_id = claim_data.get("subject_entity_id")
+            raw_predicate = claim_data.get("predicate")
             object_value = claim_data.get("object_value")
 
-            if not all([subject_entity_id, predicate, object_value is not None]):
+            if not all(
+                [raw_subject_entity_id, raw_predicate, object_value is not None]
+            ):
                 errors.append({"index": i, "error": "Missing required fields"})
                 failed += 1
                 continue
 
-            confidence = claim_data.get("confidence", 0.8)
+            subject_entity_id = str(raw_subject_entity_id)
+            predicate = str(raw_predicate)
+            confidence = float(claim_data.get("confidence", 0.8))
+            extracted_text = str(claim_data.get("extracted_text", ""))
 
             if request.check_conflicts:
-                claim_id, conflict_records = await graph_ops.add_claim_with_conflict_check(
-                    subject_entity_id=subject_entity_id,
-                    predicate=predicate,
-                    object_value=object_value,
-                    source_id=source_id,
-                    confidence=confidence,
-                    extracted_text=claim_data.get("extracted_text", ""),
+                claim_id, conflict_records = (
+                    await graph_ops.add_claim_with_conflict_check(
+                        subject_entity_id=subject_entity_id,
+                        predicate=predicate,
+                        object_value=object_value,
+                        source_id=source_id,
+                        confidence=confidence,
+                        extracted_text=extracted_text,
+                    )
                 )
                 conflicts_detected += len(conflict_records)
             else:
@@ -1022,7 +1063,7 @@ async def add_batch_claims(request: BatchClaimRequest):
                     object_value=object_value,
                     source_id=source_id,
                     confidence=confidence,
-                    extracted_text=claim_data.get("extracted_text", ""),
+                    extracted_text=extracted_text,
                 )
 
             claim_ids.append(claim_id)
@@ -1053,6 +1094,7 @@ async def add_batch_claims(request: BatchClaimRequest):
 # Conflict Endpoints
 # =============================================================================
 
+
 @app.get("/conflicts", response_model=ConflictListResponse, tags=["Conflicts"])
 async def list_conflicts(
     entity_id: Optional[str] = None,
@@ -1075,7 +1117,9 @@ async def list_conflicts(
 
     # Filter by conflict type if specified
     if conflict_type:
-        conflicts = [c for c in conflicts if c.get("conflict_type") == conflict_type.value]
+        conflicts = [
+            c for c in conflicts if c.get("conflict_type") == conflict_type.value
+        ]
 
     # Apply offset
     conflicts = conflicts[offset:]
@@ -1099,7 +1143,7 @@ async def get_conflict(conflict_id: str):
     Security: Conflict ID is validated.
     """
     # Validate conflict_id format (same format as entity IDs)
-    if not re.match(r'^[a-zA-Z0-9_-]+$', conflict_id) or len(conflict_id) > 100:
+    if not re.match(r"^[a-zA-Z0-9_-]+$", conflict_id) or len(conflict_id) > 100:
         raise HTTPException(status_code=400, detail="Invalid conflict ID format")
 
     if not neo4j_client:
@@ -1127,7 +1171,11 @@ async def get_conflict(conflict_id: str):
     return result.records[0]
 
 
-@app.post("/conflicts/{conflict_id}/resolve", response_model=ResolveConflictResponse, tags=["Conflicts"])
+@app.post(
+    "/conflicts/{conflict_id}/resolve",
+    response_model=ResolveConflictResponse,
+    tags=["Conflicts"],
+)
 async def resolve_conflict(
     conflict_id: str,
     request: ResolveConflictRequest,
@@ -1146,7 +1194,7 @@ async def resolve_conflict(
     Security: All inputs are validated. Resolution is audited.
     """
     # Validate conflict_id format
-    if not re.match(r'^[a-zA-Z0-9_-]+$', conflict_id) or len(conflict_id) > 100:
+    if not re.match(r"^[a-zA-Z0-9_-]+$", conflict_id) or len(conflict_id) > 100:
         raise HTTPException(status_code=400, detail="Invalid conflict ID format")
 
     if not conflict_resolver:
@@ -1193,7 +1241,11 @@ async def resolve_conflict(
     )
 
 
-@app.get("/conflicts/{conflict_id}/audit", response_model=AuditTrailResponse, tags=["Conflicts"])
+@app.get(
+    "/conflicts/{conflict_id}/audit",
+    response_model=AuditTrailResponse,
+    tags=["Conflicts"],
+)
 async def get_conflict_audit(conflict_id: str):
     """
     Get the audit trail for a conflict.
@@ -1214,6 +1266,7 @@ async def get_conflict_audit(conflict_id: str):
 
 class ResolutionPreviewRequest(BaseModel):
     """Request to preview a resolution."""
+
     conflict_id: str
     strategy: str
     winning_claim_id: Optional[str] = None
@@ -1221,6 +1274,7 @@ class ResolutionPreviewRequest(BaseModel):
 
 class ResolutionPreviewResponse(BaseModel):
     """Response containing resolution preview."""
+
     conflict_id: str
     proposed_winner: Optional[str]
     proposed_losers: list[str]
@@ -1229,7 +1283,9 @@ class ResolutionPreviewResponse(BaseModel):
     side_effects: list[str]
 
 
-@app.post("/conflicts/preview", response_model=ResolutionPreviewResponse, tags=["Conflicts"])
+@app.post(
+    "/conflicts/preview", response_model=ResolutionPreviewResponse, tags=["Conflicts"]
+)
 async def preview_resolution(request: ResolutionPreviewRequest):
     """
     Preview the outcome of a conflict resolution strategy.
@@ -1242,49 +1298,86 @@ async def preview_resolution(request: ResolutionPreviewRequest):
     # Get conflict details
     conflict_data = await _get_conflict_claim_data(request.conflict_id)
     if not conflict_data:
-        raise HTTPException(status_code=404, detail=f"Conflict {request.conflict_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Conflict {request.conflict_id} not found"
+        )
+
+    proposed_winner: Optional[str]
+    proposed_losers: list[str]
+    confidence: float
+    rationale: str
 
     # If winning_claim_id specified, use manual preview
     if request.winning_claim_id:
         proposed_winner = request.winning_claim_id
-        proposed_losers = [c.get("id") for c in conflict_data if c.get("id") != request.winning_claim_id]
+        proposed_losers = [
+            str(claim_id)
+            for c in conflict_data
+            if (claim_id := c.get("id")) and str(claim_id) != request.winning_claim_id
+        ]
         confidence = 1.0
         rationale = "Manual selection"
     else:
         # Simulate strategy resolution
-        strategy = ResolutionStrategy(request.strategy) if request.strategy else ResolutionStrategy.WEIGHTED_COMBINATION
+        strategy = (
+            ResolutionStrategy(request.strategy)
+            if request.strategy
+            else ResolutionStrategy.WEIGHTED_COMBINATION
+        )
 
         # Determine winner based on strategy
         if strategy == ResolutionStrategy.TIMESTAMP_BASED:
             # Newer wins
-            sorted_claims = sorted(conflict_data, key=lambda c: c.get("timestamp", ""), reverse=True)
-            proposed_winner = sorted_claims[0].get("id") if sorted_claims else None
+            sorted_claims = sorted(
+                conflict_data, key=lambda c: c.get("timestamp", ""), reverse=True
+            )
+            winner_id = sorted_claims[0].get("id") if sorted_claims else None
+            proposed_winner = str(winner_id) if winner_id else None
             rationale = "Most recent claim would win based on timestamp"
             confidence = 0.85
         elif strategy == ResolutionStrategy.CONFIDENCE_BASED:
             # Higher confidence wins
-            sorted_claims = sorted(conflict_data, key=lambda c: c.get("confidence", 0), reverse=True)
-            proposed_winner = sorted_claims[0].get("id") if sorted_claims else None
+            sorted_claims = sorted(
+                conflict_data, key=lambda c: c.get("confidence", 0), reverse=True
+            )
+            winner_id = sorted_claims[0].get("id") if sorted_claims else None
+            proposed_winner = str(winner_id) if winner_id else None
             rationale = f"Highest confidence claim ({sorted_claims[0].get('confidence', 0):.2f}) would win"
-            confidence = sorted_claims[0].get("confidence", 0.8) if sorted_claims else 0.8
+            confidence = float(
+                sorted_claims[0].get("confidence", 0.8) if sorted_claims else 0.8
+            )
         elif strategy == ResolutionStrategy.SOURCE_RELIABILITY:
             # Higher reliability wins
-            sorted_claims = sorted(conflict_data, key=lambda c: c.get("source_reliability", 0.5), reverse=True)
-            proposed_winner = sorted_claims[0].get("id") if sorted_claims else None
+            sorted_claims = sorted(
+                conflict_data,
+                key=lambda c: c.get("source_reliability", 0.5),
+                reverse=True,
+            )
+            winner_id = sorted_claims[0].get("id") if sorted_claims else None
+            proposed_winner = str(winner_id) if winner_id else None
             rationale = f"Most reliable source ({sorted_claims[0].get('source_reliability', 0.5):.2f}) would win"
-            confidence = sorted_claims[0].get("source_reliability", 0.8) if sorted_claims else 0.8
+            confidence = float(
+                sorted_claims[0].get("source_reliability", 0.8)
+                if sorted_claims
+                else 0.8
+            )
         else:
             # Default: weighted combination
-            proposed_winner = conflict_data[0].get("id") if conflict_data else None
+            winner_id = conflict_data[0].get("id") if conflict_data else None
+            proposed_winner = str(winner_id) if winner_id else None
             rationale = "Weighted combination of factors would be used"
             confidence = 0.75
 
-        proposed_losers = [c.get("id") for c in conflict_data if c.get("id") != proposed_winner]
+        proposed_losers = [
+            str(claim_id)
+            for c in conflict_data
+            if (claim_id := c.get("id")) and str(claim_id) != proposed_winner
+        ]
 
     side_effects = [
-        f"Losing claim(s) will be marked as superseded",
-        f"Truth layer will be updated for the entity",
-        f"Audit trail will be recorded",
+        "Losing claim(s) will be marked as superseded",
+        "Truth layer will be updated for the entity",
+        "Audit trail will be recorded",
     ]
 
     return ResolutionPreviewResponse(
@@ -1327,10 +1420,9 @@ async def _get_conflict_claim_data(conflict_id: str) -> list[dict[str, Any]]:
 # Admin Endpoints
 # =============================================================================
 
+
 @app.get("/admin/stats", tags=["Admin"])
-async def get_graph_stats(
-    _: bool = Depends(verify_admin_api_key)
-):
+async def get_graph_stats(_: bool = Depends(verify_admin_api_key)):
     """
     Get statistics about the knowledge graph.
 
@@ -1382,16 +1474,30 @@ async def get_graph_stats(
 
 
 @app.get("/admin/consumer/stats", response_model=ConsumerStatsResponse, tags=["Admin"])
-async def get_consumer_stats(
-    _: bool = Depends(verify_admin_api_key)
-):
+async def get_consumer_stats(_: bool = Depends(verify_admin_api_key)):
     """
     Get statistics for Kafka consumers.
 
     Security: Requires admin API key.
     """
-    claims_stats = claims_consumer.get_stats() if claims_consumer else {"running": False, "status": "not_initialized"}
-    updates_stats = updates_consumer.get_stats() if updates_consumer else {"running": False, "status": "not_initialized"}
+
+    def consumer_stats(consumer: Any) -> dict[str, Any]:
+        if not consumer:
+            return {"running": False, "status": "not_initialized"}
+
+        get_stats = getattr(consumer, "get_stats", None)
+        if callable(get_stats):
+            stats = get_stats()
+            if isinstance(stats, dict):
+                return stats
+
+        return {
+            "running": bool(getattr(consumer, "_running", False)),
+            "status": getattr(consumer, "_status", "unknown"),
+        }
+
+    claims_stats = consumer_stats(claims_consumer)
+    updates_stats = consumer_stats(updates_consumer)
 
     return ConsumerStatsResponse(
         claims_consumer=claims_stats,
@@ -1400,15 +1506,16 @@ async def get_consumer_stats(
 
 
 @app.post("/admin/consumer/restart", tags=["Admin"])
-async def restart_consumers(
-    _: bool = Depends(verify_admin_api_key)
-):
+async def restart_consumers(_: bool = Depends(verify_admin_api_key)):
     """
     Restart Kafka consumers.
 
     Security: Requires admin API key. This is a sensitive operation.
     """
-    results = {"claims_consumer": "not_initialized", "updates_consumer": "not_initialized"}
+    results = {
+        "claims_consumer": "not_initialized",
+        "updates_consumer": "not_initialized",
+    }
 
     if claims_consumer:
         try:
@@ -1426,14 +1533,15 @@ async def restart_consumers(
         except Exception as e:
             results["updates_consumer"] = f"error: {str(e)}"
 
-    return {"status": "completed", "results": results}
+    has_error = any(str(value).startswith("error:") for value in results.values())
+    restarted = any(value == "restarted" for value in results.values())
+    status = "error" if has_error else "restarted" if restarted else "completed"
+
+    return {"status": status, "results": results}
 
 
 @app.post("/admin/truth/refresh/{entity_id}", tags=["Admin"])
-async def refresh_entity_truth(
-    entity_id: str,
-    _: bool = Depends(verify_admin_api_key)
-):
+async def refresh_entity_truth(entity_id: str, _: bool = Depends(verify_admin_api_key)):
     """
     Force refresh of truth for an entity.
 
@@ -1460,7 +1568,7 @@ async def refresh_entity_truth(
 async def materialize_truths(
     background_tasks: BackgroundTasks,
     limit: int = Query(default=1000, ge=1, le=10000),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_admin_api_key),
 ):
     """
     Materialize truth values for all entities.
@@ -1487,6 +1595,7 @@ async def materialize_truths(
 # =============================================================================
 # Detect Conflicts Endpoint
 # =============================================================================
+
 
 @app.post("/detect-conflicts", tags=["Conflicts"])
 async def detect_conflicts_for_claim(

@@ -91,7 +91,7 @@ spec:
 
       containers:
         - name: graph-updater
-          image: ghcr.io/docweave/docweave/graph-updater:latest
+          image: ghcr.io/d3v07/docweave/graph-updater:latest
           imagePullPolicy: Always
 
           ports:

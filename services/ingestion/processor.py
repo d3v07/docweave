@@ -186,7 +186,7 @@ class DocumentProcessor:
 
         await self.kafka_producer.send(
             topic=settings.KAFKA_TOPIC_DOCUMENT_EVENTS,
-            value=event.model_dump_json(),
+            value=event.model_dump(mode="json"),
             key=doc.id
         )
 

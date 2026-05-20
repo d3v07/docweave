@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 class ResolutionStrategy(str, Enum):
     """Available strategies for resolving conflicts."""
+
     TIMESTAMP_BASED = "timestamp_based"
     SOURCE_RELIABILITY = "source_reliability"
     CONFIDENCE_BASED = "confidence_based"
@@ -38,6 +39,7 @@ class ResolutionStrategy(str, Enum):
 
 class ResolutionOutcome(str, Enum):
     """Possible outcomes of conflict resolution."""
+
     WINNER_SELECTED = "winner_selected"
     FLAGGED_FOR_REVIEW = "flagged_for_review"
     MERGED = "merged"  # For compatible values
@@ -53,6 +55,7 @@ class ResolutionAuditEntry:
     Tracks every resolution decision for accountability and
     potential rollback.
     """
+
     id: str
     conflict_id: str
     timestamp: datetime
@@ -89,7 +92,11 @@ class ResolutionAuditEntry:
         return cls(
             id=data["id"],
             conflict_id=data["conflict_id"],
-            timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data["timestamp"], str) else data["timestamp"],
+            timestamp=(
+                datetime.fromisoformat(data["timestamp"])
+                if isinstance(data["timestamp"], str)
+                else data["timestamp"]
+            ),
             strategy_used=ResolutionStrategy(data["strategy_used"]),
             outcome=ResolutionOutcome(data["outcome"]),
             winning_claim_id=data.get("winning_claim_id"),
@@ -110,6 +117,7 @@ class ResolutionResult:
     Contains the resolution decision, winning claim,
     and audit information.
     """
+
     conflict_id: str
     outcome: ResolutionOutcome
     winning_claim_id: Optional[str]
@@ -137,6 +145,7 @@ class ResolutionResult:
 
 class ConflictResolverConfig(BaseModel):
     """Configuration for the conflict resolver."""
+
     # Default strategy
     default_strategy: ResolutionStrategy = Field(
         default=ResolutionStrategy.WEIGHTED_COMBINATION
@@ -245,14 +254,19 @@ class ConflictResolver:
             if strategy == ResolutionStrategy.MANUAL_REVIEW:
                 outcome = ResolutionOutcome.FLAGGED_FOR_REVIEW
                 reason = "Manual review requested"
-            elif confidence >= self.config.auto_resolve_confidence_threshold or force_resolution:
+            elif (
+                confidence >= self.config.auto_resolve_confidence_threshold
+                or force_resolution
+            ):
                 winning_claim_id = best_claim_id
                 losing_claim_ids = [cid for cid, _ in sorted_claims[1:]]
                 outcome = ResolutionOutcome.WINNER_SELECTED
                 reason = self._generate_reason(strategy, best_score, score_diff)
             elif confidence >= self.config.manual_review_threshold:
                 outcome = ResolutionOutcome.FLAGGED_FOR_REVIEW
-                reason = f"Score difference ({score_diff:.2f}) below auto-resolve threshold"
+                reason = (
+                    f"Score difference ({score_diff:.2f}) below auto-resolve threshold"
+                )
             else:
                 outcome = ResolutionOutcome.DEFERRED
                 reason = f"Low confidence ({confidence:.2f}) for resolution"
@@ -326,9 +340,13 @@ class ConflictResolver:
         all_claim_ids = [c for c in all_claim_ids if c]
 
         if winning_claim_id not in all_claim_ids:
-            raise ValueError(f"Winning claim {winning_claim_id} not part of conflict {conflict_id}")
+            raise ValueError(
+                f"Winning claim {winning_claim_id} not part of conflict {conflict_id}"
+            )
 
-        losing_claim_ids = [c for c in all_claim_ids if c != winning_claim_id]
+        losing_claim_ids = [
+            str(c) for c in all_claim_ids if c and c != winning_claim_id
+        ]
 
         # Create audit entry
         audit_entry = ResolutionAuditEntry(
@@ -385,7 +403,7 @@ class ConflictResolver:
         MATCH (a:ResolutionAudit)
         """
 
-        params = {"limit": limit}
+        params: dict[str, Any] = {"limit": limit}
         conditions = []
 
         if conflict_id:
@@ -393,7 +411,9 @@ class ConflictResolver:
             params["conflict_id"] = conflict_id
 
         if claim_id:
-            conditions.append("($claim_id IN a.losing_claim_ids OR a.winning_claim_id = $claim_id)")
+            conditions.append(
+                "($claim_id IN a.losing_claim_ids OR a.winning_claim_id = $claim_id)"
+            )
             params["claim_id"] = claim_id
 
         if conditions:
@@ -460,13 +480,15 @@ class ConflictResolver:
 
         if isinstance(timestamp, str):
             try:
-                timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             except ValueError:
                 return 0.5
 
         if isinstance(timestamp, datetime):
             # Normalize to 0-1 based on recency (within last year)
-            age_seconds = (datetime.utcnow() - timestamp.replace(tzinfo=None)).total_seconds()
+            age_seconds = (
+                datetime.utcnow() - timestamp.replace(tzinfo=None)
+            ).total_seconds()
             year_seconds = 365 * 24 * 60 * 60
             return max(0.0, 1.0 - (age_seconds / year_seconds))
 
@@ -526,18 +548,18 @@ class ConflictResolver:
         voting_score = await self._score_by_voting(claim, all_claims)
 
         weighted_score = (
-            self.config.timestamp_weight * timestamp_score +
-            self.config.confidence_weight * confidence_score +
-            self.config.source_reliability_weight * reliability_score +
-            self.config.source_count_weight * voting_score
+            self.config.timestamp_weight * timestamp_score
+            + self.config.confidence_weight * confidence_score
+            + self.config.source_reliability_weight * reliability_score
+            + self.config.source_count_weight * voting_score
         )
 
         # Normalize by sum of weights
         total_weight = (
-            self.config.timestamp_weight +
-            self.config.confidence_weight +
-            self.config.source_reliability_weight +
-            self.config.source_count_weight
+            self.config.timestamp_weight
+            + self.config.confidence_weight
+            + self.config.source_reliability_weight
+            + self.config.source_count_weight
         )
 
         return weighted_score / total_weight if total_weight > 0 else 0.5
@@ -618,10 +640,13 @@ class ConflictResolver:
                 c.valid_until = datetime()
             RETURN c.id as id
             """
-            await self.client.execute_query(query, {
-                "claim_id": claim_id,
-                "winning_claim_id": winning_claim_id,
-            })
+            await self.client.execute_query(
+                query,
+                {
+                    "claim_id": claim_id,
+                    "winning_claim_id": winning_claim_id,
+                },
+            )
             actions.append(f"Marked claim {claim_id} as superseded")
 
         # Update conflict relationship
@@ -632,10 +657,13 @@ class ConflictResolver:
             r.winning_claim_id = $winning_claim_id
         RETURN r.id as id
         """
-        await self.client.execute_query(query, {
-            "conflict_id": conflict_id,
-            "winning_claim_id": winning_claim_id,
-        })
+        await self.client.execute_query(
+            query,
+            {
+                "conflict_id": conflict_id,
+                "winning_claim_id": winning_claim_id,
+            },
+        )
         actions.append(f"Resolved conflict {conflict_id}")
 
         # Ensure winning claim is current
@@ -647,14 +675,18 @@ class ConflictResolver:
         await self.client.execute_query(query, {"claim_id": winning_claim_id})
         actions.append(f"Confirmed claim {winning_claim_id} as current")
 
-        logger.info(f"Applied resolution for conflict {conflict_id}: winner={winning_claim_id}")
+        logger.info(
+            f"Applied resolution for conflict {conflict_id}: winner={winning_claim_id}"
+        )
         return actions
 
 
 # Pydantic models for API request/response
 
+
 class ManualResolutionRequest(BaseModel):
     """Request for manual conflict resolution."""
+
     winning_claim_id: str
     reason: str = Field(..., min_length=10, max_length=1000)
     resolved_by: str = Field(default="manual_user")
@@ -662,12 +694,14 @@ class ManualResolutionRequest(BaseModel):
 
 class AutoResolutionRequest(BaseModel):
     """Request for automatic conflict resolution."""
+
     strategy: Optional[ResolutionStrategy] = None
     force_resolution: bool = Field(default=False)
 
 
 class ResolutionResponse(BaseModel):
     """Response from conflict resolution."""
+
     conflict_id: str
     outcome: str
     winning_claim_id: Optional[str]

@@ -5,7 +5,7 @@ Integration Tests for Graph Updater FastAPI Application
 Tests all endpoints using TestClient with mocked Neo4j client and Kafka consumers.
 
 Run from project root:
-    PYTHONPATH=. pytest services/graph-updater/tests/test_main.py -v
+    PYTHONPATH=. pytest services/graph_updater/tests/test_main.py -v
 """
 
 import sys

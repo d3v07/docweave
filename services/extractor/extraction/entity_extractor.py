@@ -1,13 +1,15 @@
 """Entity extraction using spaCy NER."""
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Set, Tuple
-from collections import defaultdict
+
 import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Dict, List, Set, Tuple
 
 
 @dataclass
 class ExtractedEntity:
     """Represents an extracted named entity."""
+
     text: str
     normalized_text: str
     entity_type: str  # PERSON, ORG, PRODUCT, DATE, MONEY, etc.
@@ -20,7 +22,7 @@ class ExtractedEntity:
     @property
     def id(self) -> str:
         """Generate entity ID from normalized text and type."""
-        clean = re.sub(r'[^a-z0-9]', '_', self.normalized_text.lower())
+        clean = re.sub(r"[^a-z0-9]", "_", self.normalized_text.lower())
         return f"ent_{self.entity_type.lower()}_{clean[:20]}"
 
 
@@ -51,11 +53,13 @@ class EntityExtractor:
     def __init__(self, model_name: str = "en_core_web_sm"):
         """Initialize with spaCy model."""
         import spacy
+
         try:
             self.nlp = spacy.load(model_name)
         except OSError:
             # Download if not available
             from spacy.cli import download
+
             download(model_name)
             self.nlp = spacy.load(model_name)
 
@@ -92,8 +96,8 @@ class EntityExtractor:
                 confidence=confidence,
                 metadata={
                     "spacy_label": ent.label_,
-                    "sentence": ent.sent.text if ent.sent else ""
-                }
+                    "sentence": ent.sent.text if ent.sent else "",
+                },
             )
 
             entities.append(entity)
@@ -112,19 +116,25 @@ class EntityExtractor:
 
         if entity_type == "PERSON":
             # Remove titles
-            normalized = re.sub(r'^(Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s*', '', normalized)
+            normalized = re.sub(r"^(Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s*", "", normalized)
             # Normalize whitespace
-            normalized = ' '.join(normalized.split())
+            normalized = " ".join(normalized.split())
 
         elif entity_type == "ORGANIZATION":
+            normalized = re.sub(r"^(?:[A-Z]{2})\s*-\s+", "", normalized)
             # Remove common suffixes for matching
-            normalized = re.sub(r'\s+(Inc\.?|Corp\.?|LLC|Ltd\.?|Co\.?)$', '', normalized, flags=re.IGNORECASE)
-            normalized = ' '.join(normalized.split())
+            normalized = re.sub(
+                r"\s+(Inc\.?|Corp\.?|LLC|Ltd\.?|Co\.?)$",
+                "",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            normalized = " ".join(normalized.split())
 
         elif entity_type == "MONEY":
             # Normalize currency format
-            normalized = re.sub(r'[$€£]', '', normalized)
-            normalized = normalized.replace(',', '')
+            normalized = re.sub(r"[$€£]", "", normalized)
+            normalized = normalized.replace(",", "")
 
         elif entity_type == "DATE":
             # Keep as-is for now, could parse to ISO format
@@ -186,7 +196,9 @@ class EntityExtractor:
         """Get known aliases for an entity."""
         return self._alias_cache.get(normalized_name, set())
 
-    def extract_with_context(self, text: str, context_window: int = 50) -> List[ExtractedEntity]:
+    def extract_with_context(
+        self, text: str, context_window: int = 50
+    ) -> List[ExtractedEntity]:
         """Extract entities with surrounding context."""
         entities = self.extract(text)
 

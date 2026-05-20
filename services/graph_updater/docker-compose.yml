@@ -23,7 +23,7 @@ services:
   graph-updater:
     build:
       context: ../..
-      dockerfile: services/graph-updater/Dockerfile
+      dockerfile: services/graph_updater/Dockerfile
     container_name: graph-updater-dev
     hostname: graph-updater
     ports:
@@ -51,7 +51,7 @@ services:
       - METRICS_PORT=9090
     volumes:
       # Mount source for hot reload during development
-      - ../../services/graph-updater:/app/services/graph_updater:ro
+      - ../../services/graph_updater:/app/services/graph_updater:ro
       - ../../shared:/app/shared:ro
     networks:
       - graph-updater-network

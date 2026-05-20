@@ -19,6 +19,7 @@ htmlcov/
 !.env.example
 
 # Docker volumes
+data/documents/
 data/neo4j/
 data/kafka/
 data/zookeeper/

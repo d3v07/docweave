@@ -10,7 +10,7 @@ Comprehensive tests for the new endpoints added to the Graph Updater Service:
     - POST /conflicts/preview - Preview conflict resolution
 
 Run from project root:
-    PYTHONPATH=. pytest services/graph-updater/tests/test_new_endpoints.py -v
+    PYTHONPATH=. pytest services/graph_updater/tests/test_new_endpoints.py -v
 """
 
 import sys

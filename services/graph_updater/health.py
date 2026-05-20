@@ -10,20 +10,18 @@ These endpoints are designed to work with Kubernetes health probes
 and container orchestration systems.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
-
 logger = logging.getLogger(__name__)
 
 
 class HealthStatus(str, Enum):
     """Health status levels."""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -33,6 +31,7 @@ class HealthStatus(str, Enum):
 @dataclass
 class ComponentHealth:
     """Health status of a service component."""
+
     name: str
     status: HealthStatus
     latency_ms: Optional[float] = None
@@ -55,6 +54,7 @@ class ComponentHealth:
 @dataclass
 class ServiceHealth:
     """Overall service health."""
+
     status: HealthStatus
     service_name: str = "graph-updater"
     version: str = "0.4.0"
@@ -188,12 +188,18 @@ class HealthChecker:
             latency = (datetime.utcnow() - start).total_seconds() * 1000
 
             if is_healthy:
-                status = HealthStatus.HEALTHY if latency < 100 else HealthStatus.DEGRADED
+                status = (
+                    HealthStatus.HEALTHY if latency < 100 else HealthStatus.DEGRADED
+                )
                 return ComponentHealth(
                     name="neo4j",
                     status=status,
                     latency_ms=latency,
-                    message="Connected" if latency < 100 else f"High latency: {latency:.0f}ms",
+                    message=(
+                        "Connected"
+                        if latency < 100
+                        else f"High latency: {latency:.0f}ms"
+                    ),
                 )
             else:
                 return ComponentHealth(
@@ -311,7 +317,9 @@ class HealthChecker:
         # If any component is unknown, check others
         if HealthStatus.UNKNOWN in statuses:
             # All known components should be healthy
-            known_components = [c for c in components if c.status != HealthStatus.UNKNOWN]
+            known_components = [
+                c for c in components if c.status != HealthStatus.UNKNOWN
+            ]
             if all(c.status == HealthStatus.HEALTHY for c in known_components):
                 return HealthStatus.HEALTHY
             return HealthStatus.DEGRADED

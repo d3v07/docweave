@@ -10,15 +10,14 @@ and serialization logic for API requests and responses.
 """
 
 from datetime import datetime
-from enum import Enum
 from typing import Any, Optional
-from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
 
 class BatchClaimRequest(BaseModel):
     """Request to add multiple claims in a batch."""
+
     claims: list[dict[str, Any]] = Field(..., min_length=1, max_length=1000)
     check_conflicts: bool = Field(default=True)
     auto_resolve: bool = Field(default=False)
@@ -28,6 +27,7 @@ class BatchClaimRequest(BaseModel):
 
 class BatchClaimResponse(BaseModel):
     """Response from batch claim processing."""
+
     total_claims: int
     successful: int
     failed: int
@@ -39,6 +39,7 @@ class BatchClaimResponse(BaseModel):
 
 class EntitySearchRequest(BaseModel):
     """Request to search for entities."""
+
     query: str = Field(..., min_length=1, max_length=500)
     entity_type: Optional[str] = Field(default=None)
     include_merged: bool = Field(default=False)
@@ -48,6 +49,7 @@ class EntitySearchRequest(BaseModel):
 
 class EntitySearchResponse(BaseModel):
     """Response from entity search."""
+
     entities: list[dict[str, Any]]
     total: int
     has_more: bool
@@ -55,6 +57,7 @@ class EntitySearchResponse(BaseModel):
 
 class GraphStatsResponse(BaseModel):
     """Response containing graph statistics."""
+
     entity_count: int
     claim_count: int
     source_count: int
@@ -66,6 +69,7 @@ class GraphStatsResponse(BaseModel):
 
 class TruthComparisonRequest(BaseModel):
     """Request to compare truth values between time points."""
+
     entity_id: str
     predicate: Optional[str] = Field(default=None)
     time_point_1: datetime
@@ -74,6 +78,7 @@ class TruthComparisonRequest(BaseModel):
 
 class TruthComparisonResponse(BaseModel):
     """Response from truth comparison."""
+
     entity_id: str
     changes: list[dict[str, Any]]
     added_predicates: list[str]
@@ -83,6 +88,7 @@ class TruthComparisonResponse(BaseModel):
 
 class ConflictAnalysisRequest(BaseModel):
     """Request for detailed conflict analysis."""
+
     conflict_id: str
     include_source_details: bool = Field(default=True)
     include_claim_history: bool = Field(default=True)
@@ -90,6 +96,7 @@ class ConflictAnalysisRequest(BaseModel):
 
 class ConflictAnalysisResponse(BaseModel):
     """Response from conflict analysis."""
+
     conflict_id: str
     conflict_type: str
     severity: str
@@ -101,6 +108,7 @@ class ConflictAnalysisResponse(BaseModel):
 
 class ResolutionPreviewRequest(BaseModel):
     """Request to preview a resolution without applying it."""
+
     conflict_id: str
     strategy: str
     winning_claim_id: Optional[str] = Field(default=None)
@@ -108,6 +116,7 @@ class ResolutionPreviewRequest(BaseModel):
 
 class ResolutionPreviewResponse(BaseModel):
     """Response from resolution preview."""
+
     conflict_id: str
     proposed_winner: Optional[str]
     proposed_losers: list[str]
@@ -118,6 +127,7 @@ class ResolutionPreviewResponse(BaseModel):
 
 class EntityRelationship(BaseModel):
     """Represents a relationship between entities."""
+
     source_entity_id: str
     target_entity_id: str
     relationship_type: str
@@ -128,6 +138,7 @@ class EntityRelationship(BaseModel):
 
 class EntityGraph(BaseModel):
     """Represents a subgraph centered on an entity."""
+
     center_entity_id: str
     entities: list[dict[str, Any]]
     relationships: list[EntityRelationship]
@@ -136,6 +147,7 @@ class EntityGraph(BaseModel):
 
 class ClaimLineage(BaseModel):
     """Represents the lineage of a claim through supersessions."""
+
     claim_id: str
     version: int
     predecessors: list[str]
@@ -147,6 +159,7 @@ class ClaimLineage(BaseModel):
 
 class SourceImpactAnalysis(BaseModel):
     """Analysis of a source's impact on the knowledge graph."""
+
     source_id: str
     claim_count: int
     entity_count: int
@@ -158,6 +171,7 @@ class SourceImpactAnalysis(BaseModel):
 
 class BulkOperationStatus(BaseModel):
     """Status of a bulk operation in progress."""
+
     operation_id: str
     operation_type: str
     status: str
@@ -171,8 +185,11 @@ class BulkOperationStatus(BaseModel):
 
 class WebhookConfig(BaseModel):
     """Configuration for event webhooks."""
+
     url: str = Field(..., min_length=10, max_length=500)
-    events: list[str] = Field(default_factory=lambda: ["conflict_detected", "resolution_applied"])
+    events: list[str] = Field(
+        default_factory=lambda: ["conflict_detected", "resolution_applied"]
+    )
     secret: Optional[str] = Field(default=None, min_length=16, max_length=128)
     enabled: bool = Field(default=True)
     retry_count: int = Field(default=3, ge=0, le=10)
@@ -188,6 +205,7 @@ class WebhookConfig(BaseModel):
 
 class MetricsSnapshot(BaseModel):
     """Snapshot of service metrics."""
+
     timestamp: datetime
     claims_processed_total: int
     claims_processed_per_minute: float

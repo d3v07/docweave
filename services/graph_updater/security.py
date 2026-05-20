@@ -15,17 +15,16 @@ Security Features:
 
 import hashlib
 import hmac
+import logging
 import os
 import re
 import secrets
 import time
-import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
-from functools import wraps
+from datetime import datetime
 from typing import Any, Callable, Optional
 
-from fastapi import HTTPException, Request, Response, Depends
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -36,6 +35,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Configuration - Load from Environment Variables
 # =============================================================================
+
 
 class SecurityConfig:
     """
@@ -59,8 +59,7 @@ class SecurityConfig:
 
     # Allowed origins for CORS (comma-separated in env var)
     ALLOWED_ORIGINS: list[str] = os.getenv(
-        "ALLOWED_ORIGINS",
-        "http://localhost:3000,http://127.0.0.1:3000"
+        "ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
     ).split(",")
 
     # Input validation limits
@@ -74,12 +73,12 @@ class SecurityConfig:
     # Sanitization patterns
     # Disallow common injection patterns
     DANGEROUS_PATTERNS: list[str] = [
-        r'<script',  # XSS
-        r'javascript:',  # XSS
-        r'on\w+\s*=',  # Event handlers
-        r'\$\{',  # Template injection
-        r'\{\{',  # Template injection
-        r'`',  # Backtick (template literals)
+        r"<script",  # XSS
+        r"javascript:",  # XSS
+        r"on\w+\s*=",  # Event handlers
+        r"\$\{",  # Template injection
+        r"\{\{",  # Template injection
+        r"`",  # Backtick (template literals)
     ]
 
     @classmethod
@@ -98,7 +97,7 @@ class SecurityConfig:
         elif len(cls.ADMIN_API_KEY) < 32:
             warnings.append(
                 "ADMIN_API_KEY should be at least 32 characters. "
-                "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                'Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
 
         return warnings
@@ -107,6 +106,7 @@ class SecurityConfig:
 # =============================================================================
 # Rate Limiting
 # =============================================================================
+
 
 class RateLimiter:
     """
@@ -214,9 +214,7 @@ class RateLimiter:
 
         # Check hour limit
         hour_ago = now - 3600
-        hour_requests = [
-            ts for ts in self._hour_buckets[identifier] if ts > hour_ago
-        ]
+        hour_requests = [ts for ts in self._hour_buckets[identifier] if ts > hour_ago]
 
         if len(hour_requests) >= self.rph:
             oldest = min(hour_requests) if hour_requests else now
@@ -235,9 +233,9 @@ class RateLimiter:
         identifier = self._get_identifier(request)
 
         minute_ago = now - 60
-        minute_requests = len([
-            ts for ts in self._minute_buckets.get(identifier, []) if ts > minute_ago
-        ])
+        minute_requests = len(
+            [ts for ts in self._minute_buckets.get(identifier, []) if ts > minute_ago]
+        )
 
         return {
             "X-RateLimit-Limit": str(self.rpm),
@@ -258,14 +256,11 @@ rate_limiter = RateLimiter(
 # API Key Authentication
 # =============================================================================
 
-api_key_header = APIKeyHeader(
-    name=SecurityConfig.API_KEY_HEADER,
-    auto_error=False
-)
+api_key_header = APIKeyHeader(name=SecurityConfig.API_KEY_HEADER, auto_error=False)
 
 
 async def verify_admin_api_key(
-    api_key: Optional[str] = Depends(api_key_header)
+    api_key: Optional[str] = Depends(api_key_header),
 ) -> bool:
     """
     Verify admin API key for protected endpoints.
@@ -277,7 +272,7 @@ async def verify_admin_api_key(
         if os.getenv("ENVIRONMENT", "development") == "production":
             raise HTTPException(
                 status_code=503,
-                detail="Admin endpoints disabled - API key not configured"
+                detail="Admin endpoints disabled - API key not configured",
             )
         logger.warning("Admin endpoint accessed without API key configured")
         return True
@@ -286,16 +281,13 @@ async def verify_admin_api_key(
         raise HTTPException(
             status_code=401,
             detail="Missing API key",
-            headers={"WWW-Authenticate": "ApiKey"}
+            headers={"WWW-Authenticate": "ApiKey"},
         )
 
     # Constant-time comparison to prevent timing attacks
     if not hmac.compare_digest(api_key, SecurityConfig.ADMIN_API_KEY):
-        logger.warning(f"Invalid admin API key attempt")
-        raise HTTPException(
-            status_code=403,
-            detail="Invalid API key"
-        )
+        logger.warning("Invalid admin API key attempt")
+        raise HTTPException(status_code=403, detail="Invalid API key")
 
     return True
 
@@ -303,6 +295,7 @@ async def verify_admin_api_key(
 # =============================================================================
 # Input Sanitization
 # =============================================================================
+
 
 class InputSanitizer:
     """
@@ -315,7 +308,7 @@ class InputSanitizer:
     """
 
     # Characters that could be used for Cypher injection
-    CYPHER_SPECIAL_CHARS = re.compile(r'[`\'\"\\;\-\[\]\(\)\{\}]')
+    CYPHER_SPECIAL_CHARS = re.compile(r"[`\'\"\\;\-\[\]\(\)\{\}]")
 
     @classmethod
     def sanitize_string(cls, value: str, max_length: int = 1000) -> str:
@@ -339,7 +332,7 @@ class InputSanitizer:
                 logger.warning(f"Dangerous pattern detected in input: {pattern}")
                 raise HTTPException(
                     status_code=400,
-                    detail="Invalid input: potentially dangerous content detected"
+                    detail="Invalid input: potentially dangerous content detected",
                 )
 
         return value
@@ -365,11 +358,8 @@ class InputSanitizer:
             raise HTTPException(status_code=400, detail="Entity ID required")
 
         # Allow common ID formats: alphanumeric with underscores and hyphens
-        if not re.match(r'^[a-zA-Z0-9_-]+$', entity_id):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid entity ID format"
-            )
+        if not re.match(r"^[a-zA-Z0-9_-]+$", entity_id):
+            raise HTTPException(status_code=400, detail="Invalid entity ID format")
 
         return entity_id[:100]  # Max length
 
@@ -384,12 +374,12 @@ class InputSanitizer:
             raise HTTPException(status_code=400, detail="Predicate required")
 
         # Allow snake_case with alphanumeric
-        predicate = predicate.strip()[:SecurityConfig.MAX_PREDICATE_LENGTH]
+        predicate = predicate.strip()[: SecurityConfig.MAX_PREDICATE_LENGTH]
 
-        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', predicate):
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", predicate):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid predicate format. Use snake_case (e.g., 'employee_count')"
+                detail="Invalid predicate format. Use snake_case (e.g., 'employee_count')",
             )
 
         return predicate
@@ -398,6 +388,7 @@ class InputSanitizer:
 # =============================================================================
 # Security Headers Middleware
 # =============================================================================
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
@@ -451,6 +442,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 # Rate Limit Middleware
 # =============================================================================
 
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Apply rate limiting to all requests.
@@ -481,7 +473,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={
                     "Retry-After": str(retry_after),
                     **rate_limiter.get_limit_headers(request),
-                }
+                },
             )
 
         # Process request and add rate limit headers
@@ -498,48 +490,40 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 # Validated Request Models
 # =============================================================================
 
+
 class SecureClaimRequest(BaseModel):
     """
     Secure claim request with strict validation.
 
     All fields have length limits and format validation.
     """
+
     subject_entity_id: str = Field(
         ...,
         min_length=1,
         max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]+$',
-        description="Entity ID in format: ent_xxx"
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="Entity ID in format: ent_xxx",
     )
     predicate: str = Field(
         ...,
         min_length=1,
         max_length=SecurityConfig.MAX_PREDICATE_LENGTH,
-        pattern=r'^[a-zA-Z][a-zA-Z0-9_]*$',
-        description="Predicate in snake_case format"
+        pattern=r"^[a-zA-Z][a-zA-Z0-9_]*$",
+        description="Predicate in snake_case format",
     )
     object_value: Any = Field(..., description="Claim value")
     source_id: str = Field(
-        ...,
-        min_length=1,
-        max_length=200,
-        description="Source document ID"
+        ..., min_length=1, max_length=200, description="Source document ID"
     )
     confidence: float = Field(
-        default=0.8,
-        ge=0.0,
-        le=1.0,
-        description="Confidence score between 0 and 1"
+        default=0.8, ge=0.0, le=1.0, description="Confidence score between 0 and 1"
     )
     extracted_text: Optional[str] = Field(
-        default=None,
-        max_length=10000,
-        description="Original extracted text"
+        default=None, max_length=10000, description="Original extracted text"
     )
     object_entity_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]*$'
+        default=None, max_length=100, pattern=r"^[a-zA-Z0-9_-]*$"
     )
     valid_from: Optional[datetime] = None
     valid_until: Optional[datetime] = None
@@ -548,7 +532,7 @@ class SecureClaimRequest(BaseModel):
 
     model_config = {"extra": "forbid"}  # Reject unexpected fields
 
-    @field_validator('object_value')
+    @field_validator("object_value")
     @classmethod
     def validate_object_value(cls, v: Any) -> Any:
         """Validate and sanitize object value."""
@@ -562,17 +546,16 @@ class SecureClaimRequest(BaseModel):
 
 class SecureBatchClaimRequest(BaseModel):
     """Secure batch claim request with validation."""
+
     claims: list[dict[str, Any]] = Field(
         ...,
         max_length=SecurityConfig.MAX_BATCH_SIZE,
-        description=f"List of claims (max {SecurityConfig.MAX_BATCH_SIZE})"
+        description=f"List of claims (max {SecurityConfig.MAX_BATCH_SIZE})",
     )
     check_conflicts: bool = Field(default=True)
     auto_resolve: bool = Field(default=False)
     resolution_strategy: Optional[str] = Field(
-        default=None,
-        max_length=50,
-        pattern=r'^[a-z_]+$'
+        default=None, max_length=50, pattern=r"^[a-z_]+$"
     )
     source_id: Optional[str] = Field(default=None, max_length=200)
 
@@ -581,34 +564,27 @@ class SecureBatchClaimRequest(BaseModel):
 
 class SecureEntityMergeRequest(BaseModel):
     """Secure entity merge request."""
+
     target_entity_id: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]+$'
+        ..., min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$"
     )
     source_entity_ids: list[str] = Field(
-        ...,
-        min_length=1,
-        max_length=50,
-        description="Entity IDs to merge (max 50)"
+        ..., min_length=1, max_length=50, description="Entity IDs to merge (max 50)"
     )
     merge_aliases: bool = Field(default=True)
     merge_claims: bool = Field(default=True)
     resolved_by: str = Field(
-        default="api_user",
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]+$'
+        default="api_user", max_length=100, pattern=r"^[a-zA-Z0-9_-]+$"
     )
 
     model_config = {"extra": "forbid"}
 
-    @field_validator('source_entity_ids')
+    @field_validator("source_entity_ids")
     @classmethod
     def validate_source_ids(cls, v: list[str]) -> list[str]:
         """Validate source entity IDs."""
         for eid in v:
-            if not re.match(r'^[a-zA-Z0-9_-]+$', eid):
+            if not re.match(r"^[a-zA-Z0-9_-]+$", eid):
                 raise ValueError(f"Invalid entity ID format: {eid}")
             if len(eid) > 100:
                 raise ValueError(f"Entity ID too long: {eid}")
@@ -617,37 +593,28 @@ class SecureEntityMergeRequest(BaseModel):
 
 class SecureResolveConflictRequest(BaseModel):
     """Secure conflict resolution request."""
-    strategy: Optional[str] = Field(
-        default=None,
-        max_length=50,
-        pattern=r'^[A-Z_]+$'
-    )
+
+    strategy: Optional[str] = Field(default=None, max_length=50, pattern=r"^[A-Z_]+$")
     winning_claim_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]*$'
+        default=None, max_length=100, pattern=r"^[a-zA-Z0-9_-]*$"
     )
     reason: Optional[str] = Field(
-        default=None,
-        max_length=SecurityConfig.MAX_REASON_LENGTH
+        default=None, max_length=SecurityConfig.MAX_REASON_LENGTH
     )
     resolved_by: str = Field(
-        default="api_user",
-        max_length=100,
-        pattern=r'^[a-zA-Z0-9_-]+$'
+        default="api_user", max_length=100, pattern=r"^[a-zA-Z0-9_-]+$"
     )
     force: bool = Field(default=False)
 
     model_config = {"extra": "forbid"}
 
-    @field_validator('reason')
+    @field_validator("reason")
     @classmethod
     def validate_reason(cls, v: Optional[str]) -> Optional[str]:
         """Sanitize reason text."""
         if v:
             return InputSanitizer.sanitize_string(
-                v,
-                max_length=SecurityConfig.MAX_REASON_LENGTH
+                v, max_length=SecurityConfig.MAX_REASON_LENGTH
             )
         return v
 
@@ -655,6 +622,7 @@ class SecureResolveConflictRequest(BaseModel):
 # =============================================================================
 # Utility Functions
 # =============================================================================
+
 
 def generate_api_key() -> str:
     """

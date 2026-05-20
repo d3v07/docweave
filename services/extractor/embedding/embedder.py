@@ -1,12 +1,15 @@
 """Embedding generation using sentence-transformers."""
+
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from typing import List, Optional
+
 import numpy as np
 
 
 @dataclass
 class EmbeddingResult:
     """Result of embedding generation."""
+
     text: str
     embedding: List[float]
     model: str
@@ -29,6 +32,7 @@ class Embedder:
         if self._model is None:
             try:
                 from sentence_transformers import SentenceTransformer
+
                 self._model = SentenceTransformer(self.model_name)
                 # Get dimension from a test embedding
                 test_emb = self._model.encode("test")
@@ -55,10 +59,12 @@ class Embedder:
             text=text,
             embedding=embedding.tolist(),
             model=self.model_name,
-            dimension=len(embedding)
+            dimension=len(embedding),
         )
 
-    def embed_batch(self, texts: List[str], batch_size: int = 32) -> List[EmbeddingResult]:
+    def embed_batch(
+        self, texts: List[str], batch_size: int = 32
+    ) -> List[EmbeddingResult]:
         """Generate embeddings for multiple texts efficiently."""
         self._load_model()
 
@@ -67,30 +73,33 @@ class Embedder:
 
         # Encode in batches
         embeddings = self._model.encode(
-            texts,
-            batch_size=batch_size,
-            convert_to_numpy=True,
-            show_progress_bar=False
+            texts, batch_size=batch_size, convert_to_numpy=True, show_progress_bar=False
         )
 
         results = []
         for text, emb in zip(texts, embeddings):
-            results.append(EmbeddingResult(
-                text=text,
-                embedding=emb.tolist(),
-                model=self.model_name,
-                dimension=len(emb)
-            ))
+            results.append(
+                EmbeddingResult(
+                    text=text,
+                    embedding=emb.tolist(),
+                    model=self.model_name,
+                    dimension=len(emb),
+                )
+            )
 
         return results
 
-    def embed_claim(self, subject: str, predicate: str, object_value: str) -> EmbeddingResult:
+    def embed_claim(
+        self, subject: str, predicate: str, object_value: str
+    ) -> EmbeddingResult:
         """Generate embedding for a claim triple."""
         # Create a natural language representation of the claim
         claim_text = f"{subject} {predicate.replace('_', ' ')} {object_value}"
         return self.embed(claim_text)
 
-    def embed_entity(self, name: str, entity_type: str, context: str = "") -> EmbeddingResult:
+    def embed_entity(
+        self, name: str, entity_type: str, context: str = ""
+    ) -> EmbeddingResult:
         """Generate embedding for an entity."""
         # Create a rich representation
         if context:
@@ -110,10 +119,9 @@ class Embedder:
         query_embedding: List[float],
         embeddings: List[List[float]],
         top_k: int = 5,
-        threshold: float = 0.5
+        threshold: float = 0.5,
     ) -> List[tuple[int, float]]:
         """Find most similar embeddings to a query."""
-        query = np.array(query_embedding)
         similarities = []
 
         for idx, emb in enumerate(embeddings):

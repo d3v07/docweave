@@ -1,10 +1,12 @@
 """Standard predicate vocabulary for claim normalization."""
+
 from enum import Enum
-from typing import Dict, List, Set
+from typing import Dict, List
 
 
 class PredicateCategory(str, Enum):
     """Categories of predicates."""
+
     PERSON = "person"
     ORGANIZATION = "organization"
     PRODUCT = "product"
@@ -19,105 +21,101 @@ PREDICATE_VOCABULARY: Dict[str, Dict] = {
     "works_at": {
         "category": PredicateCategory.PERSON,
         "aliases": ["employed_by", "works_for", "employee_of", "employed_at"],
-        "description": "Person is employed by organization"
+        "description": "Person is employed by organization",
     },
     "job_title": {
         "category": PredicateCategory.PERSON,
         "aliases": ["position", "role", "title", "serves_as"],
-        "description": "Person's job title or position"
+        "description": "Person's job title or position",
     },
     "reports_to": {
         "category": PredicateCategory.PERSON,
         "aliases": ["managed_by", "supervised_by"],
-        "description": "Person reports to another person"
+        "description": "Person reports to another person",
     },
     "founded": {
         "category": PredicateCategory.PERSON,
         "aliases": ["founder_of", "started", "established", "created"],
-        "description": "Person founded an organization"
+        "description": "Person founded an organization",
     },
-
     # Organization predicates
     "has_revenue": {
         "category": PredicateCategory.ORGANIZATION,
         "aliases": ["revenue", "annual_revenue", "yearly_revenue", "earned"],
-        "description": "Organization's revenue"
+        "description": "Organization's revenue",
     },
     "employee_count": {
         "category": PredicateCategory.ORGANIZATION,
         "aliases": ["employees", "headcount", "staff_count", "workforce"],
-        "description": "Number of employees"
+        "description": "Number of employees",
     },
     "headquartered_in": {
         "category": PredicateCategory.ORGANIZATION,
         "aliases": ["hq_location", "based_in", "headquarters"],
-        "description": "Organization's headquarters location"
+        "description": "Organization's headquarters location",
     },
     "ceo": {
         "category": PredicateCategory.ORGANIZATION,
         "aliases": ["chief_executive", "led_by", "headed_by"],
-        "description": "Organization's CEO"
+        "description": "Organization's CEO",
     },
     "founded_date": {
         "category": PredicateCategory.ORGANIZATION,
         "aliases": ["established_date", "inception_date", "started_date"],
-        "description": "When organization was founded"
+        "description": "When organization was founded",
     },
     "acquired": {
         "category": PredicateCategory.ORGANIZATION,
         "aliases": ["bought", "purchased", "took_over"],
-        "description": "Organization acquired another"
+        "description": "Organization acquired another",
     },
-
     # Product predicates
     "manufactured_by": {
         "category": PredicateCategory.PRODUCT,
         "aliases": ["made_by", "produced_by", "created_by"],
-        "description": "Product manufacturer"
+        "description": "Product manufacturer",
     },
     "price": {
         "category": PredicateCategory.PRODUCT,
         "aliases": ["costs", "priced_at", "sells_for", "available_for"],
-        "description": "Product price"
+        "description": "Product price",
     },
     "launch_date": {
         "category": PredicateCategory.PRODUCT,
         "aliases": ["released", "launched", "available_from", "release_date"],
-        "description": "Product launch date"
+        "description": "Product launch date",
     },
     "has_feature": {
         "category": PredicateCategory.PRODUCT,
-        "aliases": ["features", "includes", "offers"],
-        "description": "Product has a feature"
+        "aliases": ["feature", "features", "includes", "offers"],
+        "description": "Product has a feature",
     },
-
     # Location predicates
     "located_in": {
         "category": PredicateCategory.LOCATION,
         "aliases": ["location", "based_in", "situated_in", "in"],
-        "description": "Entity is located in a place"
+        "description": "Entity is located in a place",
     },
     "operates_in": {
         "category": PredicateCategory.LOCATION,
         "aliases": ["active_in", "present_in", "serves"],
-        "description": "Organization operates in location"
+        "description": "Organization operates in location",
     },
-
     # General predicates
     "part_of": {
         "category": PredicateCategory.GENERAL,
         "aliases": ["belongs_to", "member_of", "subsidiary_of"],
-        "description": "Entity is part of another"
+        "description": "Entity is part of another",
     },
     "owns": {
         "category": PredicateCategory.GENERAL,
         "aliases": ["has", "possesses", "controls"],
-        "description": "Entity owns another"
+        "description": "Entity owns another",
     },
     "related_to": {
         "category": PredicateCategory.GENERAL,
         "aliases": ["associated_with", "connected_to", "linked_to"],
-        "description": "General relationship"
+        "description": "General relationship",
     },
 }
 
@@ -151,7 +149,8 @@ def get_all_predicates() -> List[str]:
 def get_predicates_by_category(category: PredicateCategory) -> List[str]:
     """Get predicates for a specific category."""
     return [
-        pred for pred, info in PREDICATE_VOCABULARY.items()
+        pred
+        for pred, info in PREDICATE_VOCABULARY.items()
         if info["category"] == category
     ]
 
@@ -167,5 +166,6 @@ RELATION_VERB_PATTERNS: Dict[str, List[str]] = {
     "acquired": ["acquire", "buy", "purchase", "take over"],
     "price": ["cost", "price", "sell", "available"],
     "launch_date": ["launch", "release", "introduce", "announce"],
+    "has_feature": ["feature", "include", "offer"],
     "located_in": ["locate", "base", "headquarter", "situate"],
 }
