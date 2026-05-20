@@ -19,6 +19,14 @@ Upload document
   -> query current truth
 ```
 
+The important design choice is that DocWeave does not treat an answer as a blob of text. It separates:
+
+- sources: where information came from
+- claims: what a source says
+- conflicts: where sources disagree
+- truth: the current best view, with evidence attached
+- dossiers: one packet that explains why the graph believes something
+
 ## Who This Is For
 
 - New to tech: start with the quick start and sample document.
@@ -29,6 +37,22 @@ Upload document
 - Demo viewers: use the sample documents in `data/samples`.
 
 ## Architecture
+
+```mermaid
+flowchart LR
+    User["User or script"] --> Ingestion["Ingestion API<br/>POST /ingest"]
+    Ingestion --> Store["Document storage<br/>data/documents"]
+    Ingestion --> TopicDocs["Kafka topic<br/>document-events"]
+    TopicDocs --> Parser["Parser service"]
+    Store --> Parser
+    Parser --> TopicParsed["Kafka topic<br/>parsed-documents"]
+    TopicParsed --> Extractor["Extractor service"]
+    Extractor --> TopicClaims["Kafka topic<br/>extracted-claims"]
+    TopicClaims --> GraphUpdater["Graph Updater"]
+    GraphUpdater --> Neo4j["Neo4j<br/>Entities, Sources, Claims, Conflicts, Truth"]
+    Neo4j --> Query["Query service"]
+    Neo4j --> Dossier["Evidence dossier<br/>truth + lineage + quality"]
+```
 
 | Service | Port | Role |
 | --- | ---: | --- |
@@ -47,6 +71,19 @@ Kafka topics:
 - `extracted-claims`
 - `graph-updates`
 - `conflicts`
+
+Claim lifecycle:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Extracted
+    Extracted --> Current: written to graph
+    Current --> Conflicting: disagreement detected
+    Conflicting --> Resolved: operator or strategy chooses winner
+    Resolved --> Current: truth cache refresh
+    Current --> Superseded: newer claim replaces it
+    Superseded --> [*]
+```
 
 ## Quick Start
 
@@ -75,6 +112,17 @@ make demo
 ```
 
 That uploads `data/samples/acme_press_release.txt`, waits for the pipeline, searches graph-updater for `Acme`, then reads current truth for Acme Corporation.
+
+Run the richer story demo:
+
+```bash
+make story
+```
+
+That ingests every sample document, requeues duplicates if needed, then prints:
+
+- an entity dossier for Acme Corporation
+- a source impact report for the Acme sample source
 
 Stop services:
 
@@ -117,6 +165,22 @@ Read current truth:
 ```bash
 curl http://localhost:8004/entity/ent_acme/truth
 ```
+
+Read the evidence dossier:
+
+```bash
+curl http://localhost:8004/entity/ent_organization_acme_corporation/dossier
+```
+
+The dossier is the best beginner-facing object in the system. It shows the entity, current truth, supporting claims, source lineage, unresolved conflicts, a claim timeline, quality signals, and deterministic follow-up actions.
+
+Check the impact of one source:
+
+```bash
+curl http://localhost:8004/source/doc_b31c1921d6dd0aef/impact
+```
+
+This answers: if this source is wrong, which entities, claims, predicates, and conflicts are affected?
 
 List unresolved conflicts:
 
@@ -161,8 +225,27 @@ Important endpoints:
 - `GET /conflicts`
 - `POST /conflicts/{id}/resolve`
 - `GET /entity/{id}/truth`
+- `GET /entity/{id}/dossier`
+- `GET /source/{id}/impact`
 
 Admin endpoints require `X-API-Key` when configured.
+
+## System Design Direction
+
+See [docs/system-design.md](docs/system-design.md) for the fuller design map.
+
+DocWeave is closest to an evidence-first GraphRAG foundation:
+
+- It already follows the indexing spine: extract entities, relationships, and claims from raw text.
+- The graph-updater keeps source lineage and conflict state instead of flattening everything into a final answer.
+- Dossiers give local, entity-centered retrieval context: facts, evidence, source trust, conflicts, and next questions.
+- The next major leap is hybrid retrieval: combine exact graph traversal with full-text/vector retrieval over source chunks, then use the dossier as the grounded context package.
+
+Design influences:
+
+- [Microsoft GraphRAG indexing](https://microsoft.github.io/graphrag/index/overview/) describes extraction of entities, relationships, claims, community structure, and embeddings from text.
+- [Neo4j GraphRAG](https://neo4j.com/labs/genai-ecosystem/graphrag/) emphasizes graph-backed retrieval with source traceability and multi-hop context.
+- [OpenTelemetry messaging conventions](https://opentelemetry.io/docs/specs/semconv/messaging/) are the right reference point for future Kafka tracing and operator visibility.
 
 ## Current Limits
 

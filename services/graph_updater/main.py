@@ -268,6 +268,31 @@ class GraphStatsResponse(BaseModel):
     last_updated: str
 
 
+class EntityDossierResponse(BaseModel):
+    """Evidence-centered view of one entity."""
+
+    entity: dict[str, Any]
+    truths: dict[str, Any]
+    evidence: list[dict[str, Any]]
+    sources: list[dict[str, Any]]
+    conflicts: dict[str, Any]
+    timeline: list[dict[str, Any]]
+    quality: dict[str, Any]
+    suggested_followups: list[str]
+    generated_at: str
+
+
+class SourceImpactResponse(BaseModel):
+    """Impact report for a source document."""
+
+    source: dict[str, Any]
+    claims: list[dict[str, Any]]
+    entities: list[dict[str, Any]]
+    predicates: list[str]
+    impact: dict[str, Any]
+    generated_at: str
+
+
 class BatchClaimRequest(BaseModel):
     """
     Request to add multiple claims at once.
@@ -456,6 +481,143 @@ app.add_middleware(
         "X-Request-ID",
     ],
 )
+
+
+def _serialize_entity_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Serialize an Entity row from Neo4j."""
+    return {
+        "id": record.get("id"),
+        "name": record.get("name"),
+        "type": record.get("type"),
+        "aliases": record.get("aliases") or [],
+        "created_at": serialize_timestamp(record.get("created_at")),
+        "updated_at": serialize_timestamp(record.get("updated_at")),
+    }
+
+
+def _serialize_claim_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Serialize a Claim row with source and optional target entity details."""
+    return {
+        "claim_id": record.get("claim_id"),
+        "predicate": record.get("predicate"),
+        "value": record.get("value"),
+        "confidence": record.get("confidence") or 0.0,
+        "status": record.get("status") or "unknown",
+        "source_id": record.get("source_id"),
+        "source_uri": record.get("source_uri"),
+        "source_reliability": record.get("source_reliability"),
+        "target_entity": (
+            {
+                "id": record.get("target_entity_id"),
+                "name": record.get("target_entity_name"),
+                "type": record.get("target_entity_type"),
+            }
+            if record.get("target_entity_id")
+            else None
+        ),
+        "extracted_text": record.get("extracted_text") or "",
+        "created_at": serialize_timestamp(record.get("created_at")),
+        "valid_from": (
+            serialize_timestamp(record.get("valid_from"))
+            if record.get("valid_from")
+            else None
+        ),
+        "valid_until": (
+            serialize_timestamp(record.get("valid_until"))
+            if record.get("valid_until")
+            else None
+        ),
+    }
+
+
+def _build_dossier_quality(
+    truths: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+    unresolved_conflicts: int,
+) -> dict[str, Any]:
+    """Build compact quality signals for an evidence dossier."""
+    status_counts: dict[str, int] = {}
+    predicate_counts: dict[str, int] = {}
+    confidences = []
+
+    for claim in evidence:
+        status = str(claim.get("status") or "unknown").lower()
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+        predicate = claim.get("predicate")
+        if predicate:
+            predicate_counts[predicate] = predicate_counts.get(predicate, 0) + 1
+
+        confidence = claim.get("confidence")
+        if isinstance(confidence, (int, float)):
+            confidences.append(float(confidence))
+
+    avg_confidence = (
+        round(sum(confidences) / len(confidences), 4) if confidences else 0.0
+    )
+    low_confidence_claims = [
+        claim["claim_id"]
+        for claim in evidence
+        if claim.get("claim_id") and float(claim.get("confidence") or 0.0) < 0.6
+    ]
+    sourced_truths = [
+        predicate
+        for predicate, truth in truths.items()
+        if isinstance(truth, dict) and truth.get("source_count", 0) > 0
+    ]
+    truth_coverage = round(len(sourced_truths) / len(truths), 4) if truths else 0.0
+
+    return {
+        "claim_count": len(evidence),
+        "source_count": len(sources),
+        "truth_count": len(truths),
+        "truth_source_coverage": truth_coverage,
+        "average_claim_confidence": avg_confidence,
+        "status_counts": status_counts,
+        "predicate_counts": predicate_counts,
+        "unresolved_conflict_count": unresolved_conflicts,
+        "low_confidence_claim_ids": low_confidence_claims,
+    }
+
+
+def _suggest_dossier_followups(
+    quality: dict[str, Any], truths: dict[str, Any]
+) -> list[str]:
+    """Generate deterministic next-step prompts from dossier quality signals."""
+    followups = []
+
+    if quality["unresolved_conflict_count"] > 0:
+        followups.append("Review unresolved conflicts before trusting final answers.")
+
+    if quality["truth_count"] == 0:
+        followups.append(
+            "Add or reprocess sources until at least one truth is derived."
+        )
+
+    if quality["truth_source_coverage"] < 1.0 and truths:
+        followups.append("Attach source-backed evidence to every current truth.")
+
+    if quality["low_confidence_claim_ids"]:
+        followups.append("Corroborate low-confidence claims with another source.")
+
+    if quality["source_count"] < 2 and quality["claim_count"] > 0:
+        followups.append("Ingest an independent source to improve confidence.")
+
+    if not followups:
+        followups.append(
+            "Use this dossier as the context package for downstream queries."
+        )
+
+    return followups
+
+
+def _sanitize_source_id(source_id: str) -> str:
+    """Validate and sanitize source IDs used in path params."""
+    source_id = InputSanitizer.sanitize_string(source_id, max_length=200)
+    if not re.match(r"^[a-zA-Z0-9_.:-]+$", source_id):
+        raise HTTPException(status_code=400, detail="Invalid source ID format")
+    return source_id
 
 
 # =============================================================================
@@ -831,6 +993,176 @@ async def get_entity_truth(entity_id: str):
         has_conflicts=entity_truth.has_conflicts,
         conflict_count=entity_truth.conflict_count,
         computed_at=entity_truth.computed_at.isoformat(),
+    )
+
+
+@app.get(
+    "/entity/{entity_id}/dossier",
+    response_model=EntityDossierResponse,
+    tags=["Truth"],
+)
+async def get_entity_dossier(
+    entity_id: str,
+    claim_limit: int = Query(default=50, ge=1, le=200),
+    conflict_limit: int = Query(default=25, ge=1, le=100),
+):
+    """
+    Get an evidence dossier for an entity.
+
+    The dossier combines current truth, source lineage, claim timeline,
+    unresolved conflicts, and quality signals into one explainable packet.
+    """
+    if not neo4j_client:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    entity_id = InputSanitizer.sanitize_entity_id(entity_id)
+
+    entity_query = """
+    MATCH (e:Entity {id: $entity_id})
+    RETURN e.id as id, e.name as name, e.type as type,
+           e.aliases as aliases, e.created_at as created_at,
+           e.updated_at as updated_at
+    """
+    entity_result = await neo4j_client.execute_query(
+        entity_query, {"entity_id": entity_id}
+    )
+    if not entity_result.records:
+        raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+
+    entity = _serialize_entity_record(entity_result.records[0])
+
+    truths: dict[str, Any] = {}
+    if truth_layer:
+        entity_truth = await truth_layer.get_entity_truth(entity_id)
+        if entity_truth:
+            truths = {k: v.to_dict() for k, v in entity_truth.truths.items()}
+
+    claims_query = """
+    MATCH (e:Entity {id: $entity_id})-[:HAS_CLAIM]->(c:Claim)
+    OPTIONAL MATCH (c)-[:SOURCED_FROM]->(s:Source)
+    OPTIONAL MATCH (c)-[:REFERS_TO]->(target:Entity)
+    RETURN c.id as claim_id, c.predicate as predicate,
+           c.object_value as value, c.confidence as confidence,
+           c.status as status, c.extracted_text as extracted_text,
+           c.created_at as created_at, c.valid_from as valid_from,
+           c.valid_until as valid_until,
+           s.id as source_id, s.uri as source_uri,
+           s.reliability_score as source_reliability,
+           target.id as target_entity_id, target.name as target_entity_name,
+           target.type as target_entity_type
+    ORDER BY c.created_at DESC
+    LIMIT $claim_limit
+    """
+    claims_result = await neo4j_client.execute_query(
+        claims_query, {"entity_id": entity_id, "claim_limit": claim_limit}
+    )
+    evidence = [_serialize_claim_record(record) for record in claims_result.records]
+
+    sources_query = """
+    MATCH (e:Entity {id: $entity_id})-[:HAS_CLAIM]->(c:Claim)-[:SOURCED_FROM]->(s:Source)
+    RETURN s.id as id, s.uri as uri, s.source_type as source_type,
+           s.reliability_score as reliability_score,
+           count(c) as claim_count,
+           collect(DISTINCT c.predicate) as predicates
+    ORDER BY claim_count DESC, id
+    """
+    sources_result = await neo4j_client.execute_query(
+        sources_query, {"entity_id": entity_id}
+    )
+    sources = [
+        {
+            "source_id": record.get("id"),
+            "uri": record.get("uri"),
+            "source_type": record.get("source_type") or "DOCUMENT",
+            "reliability_score": record.get("reliability_score"),
+            "claim_count": record.get("claim_count", 0),
+            "predicates": record.get("predicates") or [],
+        }
+        for record in sources_result.records
+    ]
+
+    conflicts_query = """
+    MATCH (e:Entity {id: $entity_id})-[:HAS_CLAIM]->(c1:Claim)-[r:CONFLICTS_WITH]-(c2:Claim)
+    WHERE coalesce(r.status, 'UNRESOLVED') = 'UNRESOLVED'
+    RETURN DISTINCT r.id as conflict_id, r.conflict_type as conflict_type,
+           c1.id as claim1_id, c1.predicate as predicate,
+           c1.object_value as value1, c1.confidence as confidence1,
+           c2.id as claim2_id, c2.object_value as value2,
+           c2.confidence as confidence2, r.created_at as detected_at
+    ORDER BY r.created_at DESC
+    LIMIT $conflict_limit
+    """
+    conflicts_result = await neo4j_client.execute_query(
+        conflicts_query,
+        {"entity_id": entity_id, "conflict_limit": conflict_limit + 1},
+    )
+    conflict_count_query = """
+    MATCH (e:Entity {id: $entity_id})-[:HAS_CLAIM]->(c1:Claim)-[r:CONFLICTS_WITH]-(c2:Claim)
+    WHERE coalesce(r.status, 'UNRESOLVED') = 'UNRESOLVED'
+    RETURN count(DISTINCT r) as unresolved_count
+    """
+    conflict_count_result = await neo4j_client.execute_query(
+        conflict_count_query, {"entity_id": entity_id}
+    )
+    unresolved_conflicts = (
+        conflict_count_result.records[0].get("unresolved_count", 0)
+        if conflict_count_result.records
+        else 0
+    )
+    conflict_items = [
+        {
+            "conflict_id": record.get("conflict_id"),
+            "conflict_type": record.get("conflict_type"),
+            "predicate": record.get("predicate"),
+            "claim1": {
+                "claim_id": record.get("claim1_id"),
+                "value": record.get("value1"),
+                "confidence": record.get("confidence1"),
+            },
+            "claim2": {
+                "claim_id": record.get("claim2_id"),
+                "value": record.get("value2"),
+                "confidence": record.get("confidence2"),
+            },
+            "detected_at": serialize_timestamp(record.get("detected_at")),
+        }
+        for record in conflicts_result.records[:conflict_limit]
+    ]
+
+    timeline = [
+        {
+            "at": claim.get("created_at"),
+            "event": "claim_observed",
+            "claim_id": claim.get("claim_id"),
+            "predicate": claim.get("predicate"),
+            "value": claim.get("value"),
+            "status": claim.get("status"),
+            "source_id": claim.get("source_id"),
+        }
+        for claim in evidence
+    ]
+
+    quality = _build_dossier_quality(
+        truths=truths,
+        evidence=evidence,
+        sources=sources,
+        unresolved_conflicts=unresolved_conflicts,
+    )
+
+    return EntityDossierResponse(
+        entity=entity,
+        truths=truths,
+        evidence=evidence,
+        sources=sources,
+        conflicts={
+            "unresolved_count": unresolved_conflicts,
+            "has_more": unresolved_conflicts > conflict_limit,
+            "items": conflict_items,
+        },
+        timeline=timeline,
+        quality=quality,
+        suggested_followups=_suggest_dossier_followups(quality, truths),
+        generated_at=datetime.utcnow().isoformat(),
     )
 
 
@@ -1414,6 +1746,181 @@ async def _get_conflict_claim_data(conflict_id: str) -> list[dict[str, Any]]:
 
     result = await neo4j_client.execute_query(query, {"conflict_id": conflict_id})
     return result.records
+
+
+# =============================================================================
+# Source Endpoints
+# =============================================================================
+
+
+@app.get(
+    "/source/{source_id}/impact",
+    response_model=SourceImpactResponse,
+    tags=["Sources"],
+)
+async def get_source_impact(
+    source_id: str,
+    claim_limit: int = Query(default=100, ge=1, le=500),
+):
+    """
+    Show how one source document shaped the graph.
+
+    This answers the operator question: if this source is wrong, which claims,
+    entities, predicates, and conflicts are affected?
+    """
+    if not neo4j_client:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    source_id = _sanitize_source_id(source_id)
+
+    source_query = """
+    MATCH (s:Source {id: $source_id})
+    RETURN s.id as id, s.uri as uri, s.source_type as source_type,
+           s.reliability_score as reliability_score,
+           s.created_at as created_at, s.updated_at as updated_at
+    """
+    source_result = await neo4j_client.execute_query(
+        source_query, {"source_id": source_id}
+    )
+    if not source_result.records:
+        raise HTTPException(status_code=404, detail=f"Source {source_id} not found")
+
+    source_record = source_result.records[0]
+    source = {
+        "source_id": source_record.get("id"),
+        "uri": source_record.get("uri"),
+        "source_type": source_record.get("source_type") or "DOCUMENT",
+        "reliability_score": source_record.get("reliability_score"),
+        "created_at": serialize_timestamp(source_record.get("created_at")),
+        "updated_at": serialize_timestamp(source_record.get("updated_at")),
+    }
+
+    claims_query = """
+    MATCH (s:Source {id: $source_id})<-[:SOURCED_FROM]-(c:Claim)<-[:HAS_CLAIM]-(e:Entity)
+    OPTIONAL MATCH (c)-[:REFERS_TO]->(target:Entity)
+    RETURN c.id as claim_id, c.predicate as predicate,
+           c.object_value as value, c.confidence as confidence,
+           c.status as status, c.extracted_text as extracted_text,
+           c.created_at as created_at, c.valid_from as valid_from,
+           c.valid_until as valid_until,
+           e.id as entity_id, e.name as entity_name, e.type as entity_type,
+           e.aliases as entity_aliases,
+           target.id as target_entity_id, target.name as target_entity_name,
+           target.type as target_entity_type
+    ORDER BY c.created_at DESC
+    LIMIT $claim_limit
+    """
+    claims_result = await neo4j_client.execute_query(
+        claims_query, {"source_id": source_id, "claim_limit": claim_limit}
+    )
+
+    claims = []
+    entities_by_id: dict[str, dict[str, Any]] = {}
+    predicates = set()
+    status_counts: dict[str, int] = {}
+    confidences = []
+
+    for record in claims_result.records:
+        entity_id = record.get("entity_id")
+        if entity_id and entity_id not in entities_by_id:
+            entities_by_id[entity_id] = {
+                "id": entity_id,
+                "name": record.get("entity_name"),
+                "type": record.get("entity_type"),
+                "aliases": record.get("entity_aliases") or [],
+            }
+
+        predicate = record.get("predicate")
+        if predicate:
+            predicates.add(predicate)
+
+        status = str(record.get("status") or "unknown").lower()
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+        confidence = record.get("confidence")
+        if isinstance(confidence, (int, float)):
+            confidences.append(float(confidence))
+
+        claims.append(
+            {
+                "claim_id": record.get("claim_id"),
+                "entity_id": entity_id,
+                "entity_name": record.get("entity_name"),
+                "predicate": predicate,
+                "value": record.get("value"),
+                "confidence": record.get("confidence") or 0.0,
+                "status": record.get("status") or "unknown",
+                "target_entity": (
+                    {
+                        "id": record.get("target_entity_id"),
+                        "name": record.get("target_entity_name"),
+                        "type": record.get("target_entity_type"),
+                    }
+                    if record.get("target_entity_id")
+                    else None
+                ),
+                "extracted_text": record.get("extracted_text") or "",
+                "created_at": serialize_timestamp(record.get("created_at")),
+                "valid_from": (
+                    serialize_timestamp(record.get("valid_from"))
+                    if record.get("valid_from")
+                    else None
+                ),
+                "valid_until": (
+                    serialize_timestamp(record.get("valid_until"))
+                    if record.get("valid_until")
+                    else None
+                ),
+            }
+        )
+
+    conflict_query = """
+    MATCH (s:Source {id: $source_id})<-[:SOURCED_FROM]-(c1:Claim)-[r:CONFLICTS_WITH]-(c2:Claim)
+    WHERE coalesce(r.status, 'UNRESOLVED') = 'UNRESOLVED'
+    RETURN count(DISTINCT r) as unresolved_conflict_count
+    """
+    conflict_result = await neo4j_client.execute_query(
+        conflict_query, {"source_id": source_id}
+    )
+    unresolved_conflicts = (
+        conflict_result.records[0].get("unresolved_conflict_count", 0)
+        if conflict_result.records
+        else 0
+    )
+
+    claim_count = len(claims)
+    current_count = status_counts.get("current", 0)
+    reliability = float(source.get("reliability_score") or 0.8)
+    avg_confidence = (
+        round(sum(confidences) / len(confidences), 4) if confidences else 0.0
+    )
+    impact_score = (
+        round(
+            ((current_count + (0.5 * unresolved_conflicts)) / claim_count)
+            * reliability,
+            4,
+        )
+        if claim_count
+        else 0.0
+    )
+
+    return SourceImpactResponse(
+        source=source,
+        claims=claims,
+        entities=list(entities_by_id.values()),
+        predicates=sorted(predicates),
+        impact={
+            "claim_count": claim_count,
+            "entity_count": len(entities_by_id),
+            "predicate_count": len(predicates),
+            "current_claim_count": current_count,
+            "unresolved_conflict_count": unresolved_conflicts,
+            "average_claim_confidence": avg_confidence,
+            "status_counts": status_counts,
+            "impact_score": impact_score,
+        },
+        generated_at=datetime.utcnow().isoformat(),
+    )
 
 
 # =============================================================================

@@ -15,9 +15,7 @@ Run from project root:
 
 import sys
 from pathlib import Path
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -36,37 +34,39 @@ mock_claim_status.CONFLICTING = MagicMock()
 mock_claim_status.CONFLICTING.value = "conflicting"
 
 # Setup mock modules
-sys.modules['shared'] = MagicMock()
-sys.modules['shared.config'] = MagicMock()
-sys.modules['shared.config.settings'] = MagicMock()
-sys.modules['shared.config.settings'].settings = MagicMock()
-sys.modules['shared.config.settings'].get_settings = MagicMock()
-sys.modules['shared.models'] = MagicMock()
-sys.modules['shared.models.claim'] = MagicMock()
-sys.modules['shared.models.claim'].ClaimStatus = mock_claim_status
-sys.modules['shared.utils'] = MagicMock()
-sys.modules['shared.utils.neo4j_client'] = MagicMock()
-sys.modules['shared.utils.neo4j_client'].Neo4jClient = MagicMock()
-sys.modules['shared.utils.kafka_client'] = MagicMock()
-sys.modules['shared.utils.kafka_client'].KafkaConsumer = MagicMock()
-sys.modules['shared.utils.kafka_client'].KafkaProducer = MagicMock()
-sys.modules['shared.utils.kafka_client'].KafkaTopics = MagicMock()
+sys.modules["shared"] = MagicMock()
+sys.modules["shared.config"] = MagicMock()
+sys.modules["shared.config.settings"] = MagicMock()
+sys.modules["shared.config.settings"].settings = MagicMock()
+sys.modules["shared.config.settings"].get_settings = MagicMock()
+sys.modules["shared.models"] = MagicMock()
+sys.modules["shared.models.claim"] = MagicMock()
+sys.modules["shared.models.claim"].ClaimStatus = mock_claim_status
+sys.modules["shared.utils"] = MagicMock()
+sys.modules["shared.utils.neo4j_client"] = MagicMock()
+sys.modules["shared.utils.neo4j_client"].Neo4jClient = MagicMock()
+sys.modules["shared.utils.kafka_client"] = MagicMock()
+sys.modules["shared.utils.kafka_client"].KafkaConsumer = MagicMock()
+sys.modules["shared.utils.kafka_client"].KafkaProducer = MagicMock()
+sys.modules["shared.utils.kafka_client"].KafkaTopics = MagicMock()
 
-from fastapi.testclient import TestClient
-
+from fastapi.testclient import TestClient  # noqa: E402
 
 # =============================================================================
 # Mock Classes
 # =============================================================================
 
+
 class MockQueryResult:
     """Mock Neo4j query result."""
+
     def __init__(self, records=None):
         self.records = records or []
 
 
 class MockNeo4jClient:
     """Mock Neo4j client for testing."""
+
     def __init__(self):
         self.execute_query = AsyncMock(return_value=MockQueryResult([]))
         self._query_history = []
@@ -95,6 +95,7 @@ class MockNeo4jClient:
 # Test Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def mock_neo4j():
     """Create a mock Neo4j client."""
@@ -108,14 +109,16 @@ def mock_claims_consumer():
     consumer._running = True
     consumer._status = "running"
     consumer.STATUS_RUNNING = "running"
-    consumer.get_stats = MagicMock(return_value={
-        "running": True,
-        "status": "running",
-        "group_id": "test-group",
-        "processed_count": 100,
-        "error_count": 2,
-        "conflict_count": 5,
-    })
+    consumer.get_stats = MagicMock(
+        return_value={
+            "running": True,
+            "status": "running",
+            "group_id": "test-group",
+            "processed_count": 100,
+            "error_count": 2,
+            "conflict_count": 5,
+        }
+    )
     consumer.start = AsyncMock()
     consumer.stop = AsyncMock()
     return consumer
@@ -128,10 +131,12 @@ def mock_updates_consumer():
     consumer._running = True
     consumer.start = AsyncMock()
     consumer.stop = AsyncMock()
-    consumer.get_stats = MagicMock(return_value={
-        "running": True,
-        "status": "running",
-    })
+    consumer.get_stats = MagicMock(
+        return_value={
+            "running": True,
+            "status": "running",
+        }
+    )
     return consumer
 
 
@@ -200,13 +205,13 @@ def client_with_mocks(
 
     # Store original values
     originals = {
-        'neo4j_client': getattr(main_module, 'neo4j_client', None),
-        'graph_ops': getattr(main_module, 'graph_ops', None),
-        'conflict_detector': getattr(main_module, 'conflict_detector', None),
-        'conflict_resolver': getattr(main_module, 'conflict_resolver', None),
-        'truth_layer': getattr(main_module, 'truth_layer', None),
-        'claims_consumer': getattr(main_module, 'claims_consumer', None),
-        'updates_consumer': getattr(main_module, 'updates_consumer', None),
+        "neo4j_client": getattr(main_module, "neo4j_client", None),
+        "graph_ops": getattr(main_module, "graph_ops", None),
+        "conflict_detector": getattr(main_module, "conflict_detector", None),
+        "conflict_resolver": getattr(main_module, "conflict_resolver", None),
+        "truth_layer": getattr(main_module, "truth_layer", None),
+        "claims_consumer": getattr(main_module, "claims_consumer", None),
+        "updates_consumer": getattr(main_module, "updates_consumer", None),
     }
 
     # Set mocked values BEFORE creating client
@@ -249,6 +254,7 @@ def client_with_mocks(
 # Entity Search Endpoint Tests (/entity/search)
 # =============================================================================
 
+
 class TestEntitySearchEndpoint:
     """Tests for GET /entity/search endpoint."""
 
@@ -257,29 +263,31 @@ class TestEntitySearchEndpoint:
         client, mocks = client_with_mocks
 
         # Mock search results
-        mocks["neo4j"].set_query_responses([
-            # Search query results
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_001",
-                    "name": "Acme Corp",
-                    "type": "ORGANIZATION",
-                    "aliases": ["ACME", "Acme Inc"],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-                {
-                    "id": "ent_002",
-                    "name": "John Doe",
-                    "type": "PERSON",
-                    "aliases": ["J. Doe"],
-                    "created_at": "2024-01-02T00:00:00",
-                    "updated_at": "2024-01-16T00:00:00",
-                },
-            ],
-            # Count query results
-            [{"total": 2}],
-        ])
+                # Search query results
+                [
+                    {
+                        "id": "ent_001",
+                        "name": "Acme Corp",
+                        "type": "ORGANIZATION",
+                        "aliases": ["ACME", "Acme Inc"],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                    {
+                        "id": "ent_002",
+                        "name": "John Doe",
+                        "type": "PERSON",
+                        "aliases": ["J. Doe"],
+                        "created_at": "2024-01-02T00:00:00",
+                        "updated_at": "2024-01-16T00:00:00",
+                    },
+                ],
+                # Count query results
+                [{"total": 2}],
+            ]
+        )
 
         response = client.get("/entity/search", params={"query": "*"})
 
@@ -295,21 +303,23 @@ class TestEntitySearchEndpoint:
         """GET /entity/search with name query returns matching entities."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
-            # Search results
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_acme",
-                    "name": "Acme Corporation",
-                    "type": "ORGANIZATION",
-                    "aliases": ["ACME"],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            # Count results
-            [{"total": 1}],
-        ])
+                # Search results
+                [
+                    {
+                        "id": "ent_acme",
+                        "name": "Acme Corporation",
+                        "type": "ORGANIZATION",
+                        "aliases": ["ACME"],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                # Count results
+                [{"total": 1}],
+            ]
+        )
 
         response = client.get("/entity/search", params={"query": "acme"})
 
@@ -322,19 +332,21 @@ class TestEntitySearchEndpoint:
         """GET /entity/search finds entities by alias."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_microsoft",
-                    "name": "Microsoft Corporation",
-                    "type": "ORGANIZATION",
-                    "aliases": ["MSFT", "Microsoft"],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [{"total": 1}],
-        ])
+                [
+                    {
+                        "id": "ent_microsoft",
+                        "name": "Microsoft Corporation",
+                        "type": "ORGANIZATION",
+                        "aliases": ["MSFT", "Microsoft"],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [{"total": 1}],
+            ]
+        )
 
         response = client.get("/entity/search", params={"query": "msft"})
 
@@ -347,23 +359,24 @@ class TestEntitySearchEndpoint:
         """GET /entity/search filters by entity_type."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_person1",
-                    "name": "Jane Smith",
-                    "type": "PERSON",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [{"total": 1}],
-        ])
+                [
+                    {
+                        "id": "ent_person1",
+                        "name": "Jane Smith",
+                        "type": "PERSON",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [{"total": 1}],
+            ]
+        )
 
         response = client.get(
-            "/entity/search",
-            params={"query": "*", "entity_type": "PERSON"}
+            "/entity/search", params={"query": "*", "entity_type": "PERSON"}
         )
 
         assert response.status_code == 200
@@ -376,40 +389,41 @@ class TestEntitySearchEndpoint:
         client, mocks = client_with_mocks
 
         # Create 5 entities, return only 2 (offset=1, limit=2)
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_002",
-                    "name": "Entity Two",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-                {
-                    "id": "ent_003",
-                    "name": "Entity Three",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-                # Third result indicates has_more
-                {
-                    "id": "ent_004",
-                    "name": "Entity Four",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [{"total": 5}],
-        ])
+                [
+                    {
+                        "id": "ent_002",
+                        "name": "Entity Two",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                    {
+                        "id": "ent_003",
+                        "name": "Entity Three",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                    # Third result indicates has_more
+                    {
+                        "id": "ent_004",
+                        "name": "Entity Four",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [{"total": 5}],
+            ]
+        )
 
         response = client.get(
-            "/entity/search",
-            params={"query": "*", "limit": 2, "offset": 1}
+            "/entity/search", params={"query": "*", "limit": 2, "offset": 1}
         )
 
         assert response.status_code == 200
@@ -422,23 +436,24 @@ class TestEntitySearchEndpoint:
         """GET /entity/search can include merged entities."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_merged",
-                    "name": "Merged Entity",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [{"total": 1}],
-        ])
+                [
+                    {
+                        "id": "ent_merged",
+                        "name": "Merged Entity",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [{"total": 1}],
+            ]
+        )
 
         response = client.get(
-            "/entity/search",
-            params={"query": "*", "include_merged": True}
+            "/entity/search", params={"query": "*", "include_merged": True}
         )
 
         assert response.status_code == 200
@@ -449,14 +464,15 @@ class TestEntitySearchEndpoint:
         """GET /entity/search returns empty results when no matches."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
-            [],  # No search results
-            [{"total": 0}],  # Count is 0
-        ])
+        mocks["neo4j"].set_query_responses(
+            [
+                [],  # No search results
+                [{"total": 0}],  # Count is 0
+            ]
+        )
 
         response = client.get(
-            "/entity/search",
-            params={"query": "nonexistent_entity_name_xyz"}
+            "/entity/search", params={"query": "nonexistent_entity_name_xyz"}
         )
 
         assert response.status_code == 200
@@ -470,10 +486,7 @@ class TestEntitySearchEndpoint:
         client, _ = client_with_mocks
 
         # Limit exceeding max (200) should fail
-        response = client.get(
-            "/entity/search",
-            params={"query": "*", "limit": 500}
-        )
+        response = client.get("/entity/search", params={"query": "*", "limit": 500})
 
         assert response.status_code == 422
 
@@ -482,6 +495,7 @@ class TestEntitySearchEndpoint:
         client, mocks = client_with_mocks
 
         from services.graph_updater import main as main_module
+
         original_neo4j = main_module.neo4j_client
         main_module.neo4j_client = None
 
@@ -497,6 +511,7 @@ class TestEntitySearchEndpoint:
 # Entity Graph Endpoint Tests (/entity/{entity_id}/graph)
 # =============================================================================
 
+
 class TestEntityGraphEndpoint:
     """Tests for GET /entity/{entity_id}/graph endpoint."""
 
@@ -505,50 +520,52 @@ class TestEntityGraphEndpoint:
         client, mocks = client_with_mocks
 
         # Mock center entity query
-        mocks["neo4j"].set_query_responses([
-            # Center entity
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_center",
-                    "name": "Acme Corp",
-                    "type": "ORGANIZATION",
-                    "aliases": ["ACME"],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            # Related entities and relationships
-            [
-                {
-                    "entity_id": "ent_ceo",
-                    "entity_name": "John Smith",
-                    "entity_type": "PERSON",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                    "source_entity_id": "ent_center",
-                    "target_entity_id": "ent_ceo",
-                    "relationship_type": "HAS_CEO",
-                    "predicate": "ceo",
-                    "confidence": 0.95,
-                    "claim_ids": ["claim_1"],
-                },
-                {
-                    "entity_id": "ent_subsidiary",
-                    "entity_name": "Acme Labs",
-                    "entity_type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                    "source_entity_id": "ent_center",
-                    "target_entity_id": "ent_subsidiary",
-                    "relationship_type": "OWNS",
-                    "predicate": "subsidiary",
-                    "confidence": 0.9,
-                    "claim_ids": ["claim_2"],
-                },
-            ],
-        ])
+                # Center entity
+                [
+                    {
+                        "id": "ent_center",
+                        "name": "Acme Corp",
+                        "type": "ORGANIZATION",
+                        "aliases": ["ACME"],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                # Related entities and relationships
+                [
+                    {
+                        "entity_id": "ent_ceo",
+                        "entity_name": "John Smith",
+                        "entity_type": "PERSON",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                        "source_entity_id": "ent_center",
+                        "target_entity_id": "ent_ceo",
+                        "relationship_type": "HAS_CEO",
+                        "predicate": "ceo",
+                        "confidence": 0.95,
+                        "claim_ids": ["claim_1"],
+                    },
+                    {
+                        "entity_id": "ent_subsidiary",
+                        "entity_name": "Acme Labs",
+                        "entity_type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                        "source_entity_id": "ent_center",
+                        "target_entity_id": "ent_subsidiary",
+                        "relationship_type": "OWNS",
+                        "predicate": "subsidiary",
+                        "confidence": 0.9,
+                        "claim_ids": ["claim_2"],
+                    },
+                ],
+            ]
+        )
 
         response = client.get("/entity/ent_center/graph")
 
@@ -569,19 +586,21 @@ class TestEntityGraphEndpoint:
         """GET /entity/{id}/graph respects depth parameter."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_center",
-                    "name": "Acme Corp",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [],  # No relationships at depth 1
-        ])
+                [
+                    {
+                        "id": "ent_center",
+                        "name": "Acme Corp",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [],  # No relationships at depth 1
+            ]
+        )
 
         response = client.get("/entity/ent_center/graph", params={"depth": 1})
 
@@ -593,19 +612,21 @@ class TestEntityGraphEndpoint:
         """GET /entity/{id}/graph accepts max depth of 5."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_center",
-                    "name": "Acme Corp",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [],
-        ])
+                [
+                    {
+                        "id": "ent_center",
+                        "name": "Acme Corp",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [],
+            ]
+        )
 
         response = client.get("/entity/ent_center/graph", params={"depth": 5})
 
@@ -633,9 +654,11 @@ class TestEntityGraphEndpoint:
         """GET /entity/{id}/graph returns 404 for unknown entity."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
-            [],  # No center entity found
-        ])
+        mocks["neo4j"].set_query_responses(
+            [
+                [],  # No center entity found
+            ]
+        )
 
         response = client.get("/entity/ent_nonexistent/graph")
 
@@ -646,19 +669,21 @@ class TestEntityGraphEndpoint:
         """GET /entity/{id}/graph returns entity with empty relationships."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_isolated",
-                    "name": "Isolated Entity",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [],  # No relationships
-        ])
+                [
+                    {
+                        "id": "ent_isolated",
+                        "name": "Isolated Entity",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [],  # No relationships
+            ]
+        )
 
         response = client.get("/entity/ent_isolated/graph")
 
@@ -673,6 +698,7 @@ class TestEntityGraphEndpoint:
         client, mocks = client_with_mocks
 
         from services.graph_updater import main as main_module
+
         original_neo4j = main_module.neo4j_client
         main_module.neo4j_client = None
 
@@ -684,8 +710,195 @@ class TestEntityGraphEndpoint:
 
 
 # =============================================================================
+# Entity Dossier Endpoint Tests (/entity/{entity_id}/dossier)
+# =============================================================================
+
+
+class TestEntityDossierEndpoint:
+    """Tests for GET /entity/{id}/dossier endpoint."""
+
+    def test_get_entity_dossier_success(self, client_with_mocks):
+        """GET /entity/{id}/dossier returns truth, evidence, sources, and quality."""
+        client, mocks = client_with_mocks
+
+        class FakeTruthValue:
+            def to_dict(self):
+                return {
+                    "entity_id": "ent_acme",
+                    "predicate": "ceo",
+                    "value": "John Smith",
+                    "confidence": 0.95,
+                    "supporting_claim_ids": ["claim_1"],
+                    "source_count": 1,
+                }
+
+        class FakeEntityTruth:
+            truths = {"ceo": FakeTruthValue()}
+
+        mocks["truth_layer"].get_entity_truth.return_value = FakeEntityTruth()
+        mocks["neo4j"].set_query_responses(
+            [
+                [
+                    {
+                        "id": "ent_acme",
+                        "name": "Acme Corporation",
+                        "type": "ORGANIZATION",
+                        "aliases": ["ACME"],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-02T00:00:00",
+                    },
+                ],
+                [
+                    {
+                        "claim_id": "claim_1",
+                        "predicate": "ceo",
+                        "value": "John Smith",
+                        "confidence": 0.95,
+                        "status": "current",
+                        "extracted_text": "John Smith, Chief Executive Officer",
+                        "created_at": "2024-01-02T00:00:00",
+                        "valid_from": None,
+                        "valid_until": None,
+                        "source_id": "doc_acme",
+                        "source_uri": "doc_acme",
+                        "source_reliability": 0.8,
+                        "target_entity_id": "ent_john",
+                        "target_entity_name": "John Smith",
+                        "target_entity_type": "PERSON",
+                    },
+                ],
+                [
+                    {
+                        "id": "doc_acme",
+                        "uri": "doc_acme",
+                        "source_type": "DOCUMENT",
+                        "reliability_score": 0.8,
+                        "claim_count": 1,
+                        "predicates": ["ceo"],
+                    },
+                ],
+                [],
+                [{"unresolved_count": 0}],
+            ]
+        )
+
+        response = client.get("/entity/ent_acme/dossier")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["entity"]["id"] == "ent_acme"
+        assert data["truths"]["ceo"]["value"] == "John Smith"
+        assert data["evidence"][0]["claim_id"] == "claim_1"
+        assert data["sources"][0]["source_id"] == "doc_acme"
+        assert data["quality"]["claim_count"] == 1
+        assert data["quality"]["truth_source_coverage"] == 1.0
+        assert data["conflicts"]["unresolved_count"] == 0
+
+    def test_get_entity_dossier_not_found(self, client_with_mocks):
+        """GET /entity/{id}/dossier returns 404 for unknown entities."""
+        client, mocks = client_with_mocks
+
+        mocks["neo4j"].set_query_responses([[]])
+
+        response = client.get("/entity/ent_missing/dossier")
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+
+# =============================================================================
+# Source Impact Endpoint Tests (/source/{source_id}/impact)
+# =============================================================================
+
+
+class TestSourceImpactEndpoint:
+    """Tests for GET /source/{source_id}/impact endpoint."""
+
+    def test_get_source_impact_success(self, client_with_mocks):
+        """GET /source/{id}/impact returns source blast radius."""
+        client, mocks = client_with_mocks
+
+        mocks["neo4j"].set_query_responses(
+            [
+                [
+                    {
+                        "id": "doc_acme",
+                        "uri": "doc_acme",
+                        "source_type": "DOCUMENT",
+                        "reliability_score": 0.8,
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-02T00:00:00",
+                    },
+                ],
+                [
+                    {
+                        "claim_id": "claim_1",
+                        "predicate": "ceo",
+                        "value": "John Smith",
+                        "confidence": 0.95,
+                        "status": "current",
+                        "extracted_text": "John Smith, Chief Executive Officer",
+                        "created_at": "2024-01-02T00:00:00",
+                        "valid_from": None,
+                        "valid_until": None,
+                        "entity_id": "ent_acme",
+                        "entity_name": "Acme Corporation",
+                        "entity_type": "ORGANIZATION",
+                        "entity_aliases": ["ACME"],
+                        "target_entity_id": "ent_john",
+                        "target_entity_name": "John Smith",
+                        "target_entity_type": "PERSON",
+                    },
+                    {
+                        "claim_id": "claim_2",
+                        "predicate": "employee_count",
+                        "value": "12,500",
+                        "confidence": 0.85,
+                        "status": "current",
+                        "extracted_text": "Employee Count: 12,500",
+                        "created_at": "2024-01-02T00:00:00",
+                        "valid_from": None,
+                        "valid_until": None,
+                        "entity_id": "ent_acme",
+                        "entity_name": "Acme Corporation",
+                        "entity_type": "ORGANIZATION",
+                        "entity_aliases": ["ACME"],
+                        "target_entity_id": None,
+                        "target_entity_name": None,
+                        "target_entity_type": None,
+                    },
+                ],
+                [{"unresolved_conflict_count": 0}],
+            ]
+        )
+
+        response = client.get("/source/doc_acme/impact")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["source"]["source_id"] == "doc_acme"
+        assert data["impact"]["claim_count"] == 2
+        assert data["impact"]["entity_count"] == 1
+        assert data["impact"]["current_claim_count"] == 2
+        assert data["impact"]["impact_score"] == 0.8
+        assert data["predicates"] == ["ceo", "employee_count"]
+
+    def test_get_source_impact_not_found(self, client_with_mocks):
+        """GET /source/{id}/impact returns 404 for unknown sources."""
+        client, mocks = client_with_mocks
+
+        mocks["neo4j"].set_query_responses([[]])
+
+        response = client.get("/source/doc_missing/impact")
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+
+# =============================================================================
 # Admin Stats Endpoint Tests (/admin/stats)
 # =============================================================================
+
 
 class TestAdminStatsEndpoint:
     """Tests for GET /admin/stats endpoint."""
@@ -694,16 +907,18 @@ class TestAdminStatsEndpoint:
         """GET /admin/stats returns graph statistics."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "entity_count": 150,
-                "claim_count": 500,
-                "source_count": 25,
-                "conflict_count": 12,
-                "truth_count": 300,
-                "resolution_count": 8,
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "entity_count": 150,
+                    "claim_count": 500,
+                    "source_count": 25,
+                    "conflict_count": 12,
+                    "truth_count": 300,
+                    "resolution_count": 8,
+                },
+            ]
+        )
 
         response = client.get("/admin/stats")
 
@@ -721,16 +936,18 @@ class TestAdminStatsEndpoint:
         """GET /admin/stats returns zeros for empty graph."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "entity_count": 0,
-                "claim_count": 0,
-                "source_count": 0,
-                "conflict_count": 0,
-                "truth_count": 0,
-                "resolution_count": 0,
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "entity_count": 0,
+                    "claim_count": 0,
+                    "source_count": 0,
+                    "conflict_count": 0,
+                    "truth_count": 0,
+                    "resolution_count": 0,
+                },
+            ]
+        )
 
         response = client.get("/admin/stats")
 
@@ -759,6 +976,7 @@ class TestAdminStatsEndpoint:
         client, mocks = client_with_mocks
 
         from services.graph_updater import main as main_module
+
         original_neo4j = main_module.neo4j_client
         main_module.neo4j_client = None
 
@@ -772,6 +990,7 @@ class TestAdminStatsEndpoint:
 # =============================================================================
 # Batch Claim Endpoint Tests (/claim/batch)
 # =============================================================================
+
 
 class TestBatchClaimEndpoint:
     """Tests for POST /claim/batch endpoint."""
@@ -811,7 +1030,7 @@ class TestBatchClaimEndpoint:
                     },
                 ],
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -842,7 +1061,7 @@ class TestBatchClaimEndpoint:
                 ],
                 "source_id": "default_source",
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -878,7 +1097,7 @@ class TestBatchClaimEndpoint:
                     },
                 ],
                 "check_conflicts": True,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -918,7 +1137,7 @@ class TestBatchClaimEndpoint:
                     },
                 ],
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -960,7 +1179,7 @@ class TestBatchClaimEndpoint:
                     },
                 ],
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -979,7 +1198,7 @@ class TestBatchClaimEndpoint:
             json={
                 "claims": [],
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -993,6 +1212,7 @@ class TestBatchClaimEndpoint:
         client, mocks = client_with_mocks
 
         from services.graph_updater import main as main_module
+
         original_graph_ops = main_module.graph_ops
         main_module.graph_ops = None
 
@@ -1007,7 +1227,7 @@ class TestBatchClaimEndpoint:
                         "source_id": "src_1",
                     },
                 ],
-            }
+            },
         )
 
         main_module.graph_ops = original_graph_ops
@@ -1038,7 +1258,7 @@ class TestBatchClaimEndpoint:
                     },
                 ],
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1050,6 +1270,7 @@ class TestBatchClaimEndpoint:
 # Conflict Preview Endpoint Tests (/conflicts/preview)
 # =============================================================================
 
+
 class TestConflictPreviewEndpoint:
     """Tests for POST /conflicts/preview endpoint."""
 
@@ -1058,31 +1279,33 @@ class TestConflictPreviewEndpoint:
         client, mocks = client_with_mocks
 
         # Mock conflict data query
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_old",
-                "object_value": "1200",
-                "confidence": 0.85,
-                "timestamp": "2023-01-01T00:00:00",
-                "source_reliability": 0.8,
-                "entity_id": "ent_test",
-            },
-            {
-                "id": "claim_new",
-                "object_value": "1500",
-                "confidence": 0.9,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.85,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_old",
+                    "object_value": "1200",
+                    "confidence": 0.85,
+                    "timestamp": "2023-01-01T00:00:00",
+                    "source_reliability": 0.8,
+                    "entity_id": "ent_test",
+                },
+                {
+                    "id": "claim_new",
+                    "object_value": "1500",
+                    "confidence": 0.9,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.85,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         response = client.post(
             "/conflicts/preview",
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "timestamp_based",
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1098,31 +1321,33 @@ class TestConflictPreviewEndpoint:
         """POST /conflicts/preview with confidence_based strategy."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_low",
-                "object_value": "1200",
-                "confidence": 0.7,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.9,
-                "entity_id": "ent_test",
-            },
-            {
-                "id": "claim_high",
-                "object_value": "1500",
-                "confidence": 0.95,
-                "timestamp": "2023-01-01T00:00:00",
-                "source_reliability": 0.8,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_low",
+                    "object_value": "1200",
+                    "confidence": 0.7,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.9,
+                    "entity_id": "ent_test",
+                },
+                {
+                    "id": "claim_high",
+                    "object_value": "1500",
+                    "confidence": 0.95,
+                    "timestamp": "2023-01-01T00:00:00",
+                    "source_reliability": 0.8,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         response = client.post(
             "/conflicts/preview",
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "confidence_based",
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1135,31 +1360,33 @@ class TestConflictPreviewEndpoint:
         """POST /conflicts/preview with source_reliability strategy."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_unreliable",
-                "object_value": "1200",
-                "confidence": 0.9,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.5,
-                "entity_id": "ent_test",
-            },
-            {
-                "id": "claim_reliable",
-                "object_value": "1500",
-                "confidence": 0.8,
-                "timestamp": "2023-01-01T00:00:00",
-                "source_reliability": 0.95,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_unreliable",
+                    "object_value": "1200",
+                    "confidence": 0.9,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.5,
+                    "entity_id": "ent_test",
+                },
+                {
+                    "id": "claim_reliable",
+                    "object_value": "1500",
+                    "confidence": 0.8,
+                    "timestamp": "2023-01-01T00:00:00",
+                    "source_reliability": 0.95,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         response = client.post(
             "/conflicts/preview",
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "source_reliability",
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1171,24 +1398,26 @@ class TestConflictPreviewEndpoint:
         """POST /conflicts/preview with manual winning_claim_id."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_a",
-                "object_value": "1200",
-                "confidence": 0.9,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.8,
-                "entity_id": "ent_test",
-            },
-            {
-                "id": "claim_b",
-                "object_value": "1500",
-                "confidence": 0.8,
-                "timestamp": "2023-01-01T00:00:00",
-                "source_reliability": 0.9,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_a",
+                    "object_value": "1200",
+                    "confidence": 0.9,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.8,
+                    "entity_id": "ent_test",
+                },
+                {
+                    "id": "claim_b",
+                    "object_value": "1500",
+                    "confidence": 0.8,
+                    "timestamp": "2023-01-01T00:00:00",
+                    "source_reliability": 0.9,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         response = client.post(
             "/conflicts/preview",
@@ -1196,7 +1425,7 @@ class TestConflictPreviewEndpoint:
                 "conflict_id": "conflict_123",
                 "strategy": "manual_review",
                 "winning_claim_id": "claim_a",
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1210,31 +1439,33 @@ class TestConflictPreviewEndpoint:
         """POST /conflicts/preview with weighted_combination strategy."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_1",
-                "object_value": "value1",
-                "confidence": 0.8,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.7,
-                "entity_id": "ent_test",
-            },
-            {
-                "id": "claim_2",
-                "object_value": "value2",
-                "confidence": 0.75,
-                "timestamp": "2023-06-01T00:00:00",
-                "source_reliability": 0.8,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_1",
+                    "object_value": "value1",
+                    "confidence": 0.8,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.7,
+                    "entity_id": "ent_test",
+                },
+                {
+                    "id": "claim_2",
+                    "object_value": "value2",
+                    "confidence": 0.75,
+                    "timestamp": "2023-06-01T00:00:00",
+                    "source_reliability": 0.8,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         response = client.post(
             "/conflicts/preview",
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "weighted_combination",
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1253,7 +1484,7 @@ class TestConflictPreviewEndpoint:
             json={
                 "conflict_id": "nonexistent_conflict",
                 "strategy": "confidence_based",
-            }
+            },
         )
 
         assert response.status_code == 404
@@ -1263,31 +1494,33 @@ class TestConflictPreviewEndpoint:
         """POST /conflicts/preview includes side effects description."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_a",
-                "object_value": "value_a",
-                "confidence": 0.9,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.85,
-                "entity_id": "ent_test",
-            },
-            {
-                "id": "claim_b",
-                "object_value": "value_b",
-                "confidence": 0.8,
-                "timestamp": "2023-01-01T00:00:00",
-                "source_reliability": 0.8,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_a",
+                    "object_value": "value_a",
+                    "confidence": 0.9,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.85,
+                    "entity_id": "ent_test",
+                },
+                {
+                    "id": "claim_b",
+                    "object_value": "value_b",
+                    "confidence": 0.8,
+                    "timestamp": "2023-01-01T00:00:00",
+                    "source_reliability": 0.8,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         response = client.post(
             "/conflicts/preview",
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "confidence_based",
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1304,6 +1537,7 @@ class TestConflictPreviewEndpoint:
         client, mocks = client_with_mocks
 
         from services.graph_updater import main as main_module
+
         original_resolver = main_module.conflict_resolver
         main_module.conflict_resolver = None
 
@@ -1312,7 +1546,7 @@ class TestConflictPreviewEndpoint:
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "confidence_based",
-            }
+            },
         )
 
         main_module.conflict_resolver = original_resolver
@@ -1323,16 +1557,18 @@ class TestConflictPreviewEndpoint:
         """POST /conflicts/preview uses weighted_combination as default."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_a",
-                "object_value": "value_a",
-                "confidence": 0.9,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.85,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_a",
+                    "object_value": "value_a",
+                    "confidence": 0.9,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.85,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         # No strategy specified, should use default
         response = client.post(
@@ -1340,7 +1576,7 @@ class TestConflictPreviewEndpoint:
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "",  # Empty strategy
-            }
+            },
         )
 
         # Should not fail, uses default
@@ -1351,6 +1587,7 @@ class TestConflictPreviewEndpoint:
 # Integration Tests for New Endpoints
 # =============================================================================
 
+
 class TestNewEndpointsIntegration:
     """Integration tests combining multiple new endpoints."""
 
@@ -1359,42 +1596,43 @@ class TestNewEndpointsIntegration:
         client, mocks = client_with_mocks
 
         # Step 1: Search for entity
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_found",
-                    "name": "Found Corp",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [{"total": 1}],
-        ])
-
-        search_response = client.get(
-            "/entity/search",
-            params={"query": "Found"}
+                [
+                    {
+                        "id": "ent_found",
+                        "name": "Found Corp",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [{"total": 1}],
+            ]
         )
+
+        search_response = client.get("/entity/search", params={"query": "Found"})
 
         assert search_response.status_code == 200
         entity_id = search_response.json()["entities"][0]["id"]
 
         # Step 2: Get entity graph
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": entity_id,
-                    "name": "Found Corp",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [],  # No relationships
-        ])
+                [
+                    {
+                        "id": entity_id,
+                        "name": "Found Corp",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [],  # No relationships
+            ]
+        )
 
         graph_response = client.get(f"/entity/{entity_id}/graph")
 
@@ -1406,9 +1644,7 @@ class TestNewEndpointsIntegration:
         client, mocks = client_with_mocks
 
         # Step 1: Add batch claims
-        mocks["graph_ops"].add_claim = AsyncMock(
-            side_effect=["claim_1", "claim_2"]
-        )
+        mocks["graph_ops"].add_claim = AsyncMock(side_effect=["claim_1", "claim_2"])
 
         batch_response = client.post(
             "/claim/batch",
@@ -1428,23 +1664,25 @@ class TestNewEndpointsIntegration:
                     },
                 ],
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert batch_response.status_code == 200
         assert batch_response.json()["successful"] == 2
 
         # Step 2: Check stats
-        mocks["neo4j"].set_query_response([
-            {
-                "entity_count": 2,
-                "claim_count": 2,
-                "source_count": 1,
-                "conflict_count": 0,
-                "truth_count": 0,
-                "resolution_count": 0,
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "entity_count": 2,
+                    "claim_count": 2,
+                    "source_count": 1,
+                    "conflict_count": 0,
+                    "truth_count": 0,
+                    "resolution_count": 0,
+                },
+            ]
+        )
 
         stats_response = client.get("/admin/stats")
 
@@ -1472,38 +1710,40 @@ class TestNewEndpointsIntegration:
                     },
                 ],
                 "check_conflicts": True,
-            }
+            },
         )
 
         assert batch_response.status_code == 200
         assert batch_response.json()["conflicts_detected"] == 1
 
         # Step 2: Preview conflict resolution
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_old",
-                "object_value": "$10M",
-                "confidence": 0.8,
-                "timestamp": "2023-01-01T00:00:00",
-                "source_reliability": 0.7,
-                "entity_id": "ent_1",
-            },
-            {
-                "id": "claim_new",
-                "object_value": "$15M",
-                "confidence": 0.9,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.85,
-                "entity_id": "ent_1",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_old",
+                    "object_value": "$10M",
+                    "confidence": 0.8,
+                    "timestamp": "2023-01-01T00:00:00",
+                    "source_reliability": 0.7,
+                    "entity_id": "ent_1",
+                },
+                {
+                    "id": "claim_new",
+                    "object_value": "$15M",
+                    "confidence": 0.9,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.85,
+                    "entity_id": "ent_1",
+                },
+            ]
+        )
 
         preview_response = client.post(
             "/conflicts/preview",
             json={
                 "conflict_id": "conflict_1",
                 "strategy": "confidence_based",
-            }
+            },
         )
 
         assert preview_response.status_code == 200
@@ -1514,6 +1754,7 @@ class TestNewEndpointsIntegration:
 # Edge Cases and Error Handling
 # =============================================================================
 
+
 class TestNewEndpointsEdgeCases:
     """Edge cases and error handling for new endpoints."""
 
@@ -1521,16 +1762,15 @@ class TestNewEndpointsEdgeCases:
         """GET /entity/search handles special characters in query."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
-            [],
-            [{"total": 0}],
-        ])
+        mocks["neo4j"].set_query_responses(
+            [
+                [],
+                [{"total": 0}],
+            ]
+        )
 
         # Query with special characters
-        response = client.get(
-            "/entity/search",
-            params={"query": "O'Brien & Co."}
-        )
+        response = client.get("/entity/search", params={"query": "O'Brien & Co."})
 
         assert response.status_code == 200
 
@@ -1538,24 +1778,23 @@ class TestNewEndpointsEdgeCases:
         """GET /entity/search handles unicode characters."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_unicode",
-                    "name": "Cafe Creme",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            [{"total": 1}],
-        ])
-
-        response = client.get(
-            "/entity/search",
-            params={"query": "Cafe"}
+                [
+                    {
+                        "id": "ent_unicode",
+                        "name": "Cafe Creme",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                [{"total": 1}],
+            ]
         )
+
+        response = client.get("/entity/search", params={"query": "Cafe"})
 
         assert response.status_code == 200
 
@@ -1579,7 +1818,7 @@ class TestNewEndpointsEdgeCases:
                     },
                 ],
                 "check_conflicts": False,
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1589,23 +1828,25 @@ class TestNewEndpointsEdgeCases:
         client, mocks = client_with_mocks
 
         # Only one claim in conflict (edge case)
-        mocks["neo4j"].set_query_response([
-            {
-                "id": "claim_only",
-                "object_value": "value",
-                "confidence": 0.9,
-                "timestamp": "2024-01-01T00:00:00",
-                "source_reliability": 0.85,
-                "entity_id": "ent_test",
-            },
-        ])
+        mocks["neo4j"].set_query_response(
+            [
+                {
+                    "id": "claim_only",
+                    "object_value": "value",
+                    "confidence": 0.9,
+                    "timestamp": "2024-01-01T00:00:00",
+                    "source_reliability": 0.85,
+                    "entity_id": "ent_test",
+                },
+            ]
+        )
 
         response = client.post(
             "/conflicts/preview",
             json={
                 "conflict_id": "conflict_123",
                 "strategy": "confidence_based",
-            }
+            },
         )
 
         assert response.status_code == 200
@@ -1617,49 +1858,51 @@ class TestNewEndpointsEdgeCases:
         """GET /entity/{id}/graph handles circular relationships."""
         client, mocks = client_with_mocks
 
-        mocks["neo4j"].set_query_responses([
+        mocks["neo4j"].set_query_responses(
             [
-                {
-                    "id": "ent_a",
-                    "name": "Entity A",
-                    "type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                },
-            ],
-            # Circular: A -> B -> A
-            [
-                {
-                    "entity_id": "ent_b",
-                    "entity_name": "Entity B",
-                    "entity_type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                    "source_entity_id": "ent_a",
-                    "target_entity_id": "ent_b",
-                    "relationship_type": "RELATED_TO",
-                    "predicate": "related",
-                    "confidence": 0.9,
-                    "claim_ids": [],
-                },
-                {
-                    "entity_id": "ent_a",
-                    "entity_name": "Entity A",
-                    "entity_type": "ORGANIZATION",
-                    "aliases": [],
-                    "created_at": "2024-01-01T00:00:00",
-                    "updated_at": "2024-01-15T00:00:00",
-                    "source_entity_id": "ent_b",
-                    "target_entity_id": "ent_a",
-                    "relationship_type": "RELATED_TO",
-                    "predicate": "related",
-                    "confidence": 0.9,
-                    "claim_ids": [],
-                },
-            ],
-        ])
+                [
+                    {
+                        "id": "ent_a",
+                        "name": "Entity A",
+                        "type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                    },
+                ],
+                # Circular: A -> B -> A
+                [
+                    {
+                        "entity_id": "ent_b",
+                        "entity_name": "Entity B",
+                        "entity_type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                        "source_entity_id": "ent_a",
+                        "target_entity_id": "ent_b",
+                        "relationship_type": "RELATED_TO",
+                        "predicate": "related",
+                        "confidence": 0.9,
+                        "claim_ids": [],
+                    },
+                    {
+                        "entity_id": "ent_a",
+                        "entity_name": "Entity A",
+                        "entity_type": "ORGANIZATION",
+                        "aliases": [],
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-15T00:00:00",
+                        "source_entity_id": "ent_b",
+                        "target_entity_id": "ent_a",
+                        "relationship_type": "RELATED_TO",
+                        "predicate": "related",
+                        "confidence": 0.9,
+                        "claim_ids": [],
+                    },
+                ],
+            ]
+        )
 
         response = client.get("/entity/ent_a/graph")
 

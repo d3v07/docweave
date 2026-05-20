@@ -15,6 +15,7 @@ It does not read documents by itself. In the full DocWeave flow, ingestion, pars
 | Confidence | How sure the extractor is | `0.95` |
 | Conflict | Two claims disagree | `employee_count 15000` vs `14500` |
 | Truth | The best current value after conflict handling | `employee_count 15000` |
+| Dossier | Entity truth plus evidence, lineage, quality, and next checks | `GET /entity/{id}/dossier` |
 
 ## Run Locally
 
@@ -81,6 +82,22 @@ Read current truth:
 ```bash
 curl http://localhost:8004/entity/ent_acme/truth
 ```
+
+Read the evidence dossier:
+
+```bash
+curl http://localhost:8004/entity/ent_acme/dossier
+```
+
+Use the dossier when you need to explain an answer. It includes current truth, supporting claims, source lineage, conflicts, a timeline, quality signals, and suggested follow-up checks.
+
+Check source impact:
+
+```bash
+curl http://localhost:8004/source/src_demo/impact
+```
+
+Use source impact when you need to know what would be affected if a source is corrected or removed.
 
 Create a conflict by adding a different value for the same entity and predicate:
 
