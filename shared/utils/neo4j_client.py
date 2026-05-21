@@ -511,8 +511,8 @@ class Neo4jClient:
         execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
         # Parse results into nodes and relationships
-        nodes = []
-        relationships = []
+        nodes: list[GraphNode] = []
+        relationships: list[GraphRelationship] = []
 
         for record in records:
             for value in record.values():

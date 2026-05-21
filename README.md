@@ -1,161 +1,259 @@
-# DocWeave: Event-Driven Knowledge Graph from Document Streams
+# DocWeave
 
-Continuously extract structured knowledge from document streams using a microservices pipeline. Documents flow through parsing → claim extraction → relationship discovery → Neo4j graph storage.
+DocWeave turns documents into a queryable knowledge graph.
 
-## Problem Solved
+In beginner terms: a document sentence like `Acme Corporation is headquartered in San Francisco` becomes a structured claim:
 
-Unstructured documents (PDFs, articles, reports) contain valuable knowledge but require manual structuring. DocWeave automates extraction and builds a queryable knowledge graph: "Document X claims that resource A depends on technology B" becomes a graph edge queryable via REST API.
+```text
+Acme Corporation --headquartered_in--> San Francisco
+```
+
+The project is a small service pipeline:
+
+```text
+Upload document
+  -> parse text
+  -> extract entities and claims
+  -> write claims to Neo4j
+  -> detect conflicts
+  -> query current truth
+```
+
+The important design choice is that DocWeave does not treat an answer as a blob of text. It separates:
+
+- sources: where information came from
+- claims: what a source says
+- conflicts: where sources disagree
+- truth: the current best view, with evidence attached
+- dossiers: one packet that explains why the graph believes something
+
+## Who This Is For
+
+- New to tech: start with the quick start and sample document.
+- Docker users: use `make dev`, `make health`, and `make demo`.
+- Python developers: run `make test` and work inside the service folders.
+- Container users: the graph-updater image is published as `ghcr.io/d3v07/docweave/graph-updater`.
+- Operators: see `services/graph_updater/k8s` and `services/graph_updater/monitoring`.
+- Demo viewers: use the sample documents in `data/samples`.
 
 ## Architecture
 
-```
-Document Upload (port 8001)
-  ↓ [Kafka: document-events]
-Parser (port 8002)
-  ↓ [Kafka: parsed-documents]
-Extractor (port 8003)
-  ├→ [Kafka: extracted-claims]
-  └→ [Kafka: graph-updates]
-Graph Updater (port 8004)
-  ├→ Neo4j (relationships, entities)
-  └→ [Kafka: conflicts] (resolution queue)
-Query Service (port 8005) ← REST API
-```
-
-## Evidence
-
-**Data Flow** (`docker-compose.yml`):
-- Ingestion service: Receives `UploadFile` via FastAPI; publishes JSON event to `document-events` (3 partitions)
-- Parser service: Consumes `document-events`; extracts text + structure; publishes to `parsed-documents`
-- Extractor service: Consumes `parsed-documents`; identifies claims (Pydantic models); publishes to `extracted-claims` + `graph-updates`
-- Graph Updater: Consumes both; writes to Neo4j Bolt (port 7687); publishes conflicts to `conflicts` topic
-- Query Service: Reads from Neo4j; exposes REST API on port 8005
-
-**Tech Stack**:
-- Services: Python 3.10+, FastAPI (6 services)
-- Message Broker: Apache Kafka 7.5.3 (Confluent) with ZooKeeper
-- Graph DB: Neo4j 5 Enterprise with APOC plugin (query/path analysis)
-- Orchestration: Docker Compose with health checks
-- Storage: Persistent volumes for Neo4j, ZooKeeper, Kafka
-
-**Kafka Topics** (auto-created):
-- `document-events` (3 partitions) — Raw document metadata
-- `parsed-documents` (3 partitions) — Text extracted + structure
-- `extracted-claims` (3 partitions) — Structured claims
-- `graph-updates` (3 partitions) — Neo4j mutations
-- `conflicts` (3 partitions) — Duplicate/conflicting relationships
-
-**Services** (`services/*/main.py`):
-- **ingestion** (port 8001): POST `/documents` → stores file + publishes event; GET `/documents` → list uploaded docs
-- **parser** (port 8002): POST `/parse` (internal); consumes document-events
-- **extractor** (port 8003): POST `/extract` (internal); consumes parsed-documents; publishes claims
-- **graph-updater** (port 8004): POST `/update-graph` (internal); Neo4j write; conflict detection
-- **query-service** (port 8005): GET `/entities` → list entities; GET `/relationships` → query edges; GET `/paths/:from/:to` → traversal
-
-**Health Checks** (`docker-compose.yml`):
-- FastAPI services: curl to `http://service:port/health`
-- Kafka: `kafka-broker-api-versions --bootstrap-server localhost:9092`
-- Neo4j: wget to `http://localhost:7474`
-
-**Extensibility**:
-- `connectors/` directory for pluggable data sources (S3, web crawlers, etc.)
-- `shared/config/settings.py` centralizes Kafka bootstrap, Neo4j URIs, auth
-
-## Deployment
-
-**Prerequisites**:
-- Docker & Docker Compose
-- Set `NEO4J_PASSWORD` in `.env` or environment
-
-**Start All Services**:
-```bash
-cp .env.example .env
-# Edit .env: NEO4J_PASSWORD=your_strong_password
-docker-compose up -d
+```mermaid
+flowchart LR
+    User["User or script"] --> Ingestion["Ingestion API<br/>POST /ingest"]
+    Ingestion --> Store["Document storage<br/>data/documents"]
+    Ingestion --> TopicDocs["Kafka topic<br/>document-events"]
+    TopicDocs --> Parser["Parser service"]
+    Store --> Parser
+    Parser --> TopicParsed["Kafka topic<br/>parsed-documents"]
+    TopicParsed --> Extractor["Extractor service"]
+    Extractor --> TopicClaims["Kafka topic<br/>extracted-claims"]
+    TopicClaims --> GraphUpdater["Graph Updater"]
+    GraphUpdater --> Neo4j["Neo4j<br/>Entities, Sources, Claims, Conflicts, Truth"]
+    Neo4j --> Query["Query service"]
+    Neo4j --> Dossier["Evidence dossier<br/>truth + lineage + quality"]
 ```
 
-All services auto-health-check and retry on startup. Kafka topics created automatically.
+| Service | Port | Role |
+| --- | ---: | --- |
+| Ingestion | 8001 | Receives files through `POST /ingest` and stores them |
+| Parser | 8002 | Reads stored files and publishes parsed text |
+| Extractor | 8003 | Extracts entities, relationships, and claims |
+| Graph Updater | 8004 | Writes claims, detects conflicts, and maintains truth |
+| Query Service | 8005 | Searches the graph |
+| Neo4j | 7474, 7687 | Stores the graph |
+| Kafka | 9092 | Moves events between services |
 
-**Access Points**:
+Kafka topics:
 
-| Service | Endpoint | Purpose |
-|---------|----------|---------|
-| Neo4j Browser | http://localhost:7474 | Graph visualization + CYPHER queries |
-| Ingestion API | http://localhost:8001 | Upload documents |
-| Parser API | http://localhost:8002 | (Internal; not publicly exposed) |
-| Extractor API | http://localhost:8003 | (Internal; not publicly exposed) |
-| Graph Updater | http://localhost:8004 | (Internal; not publicly exposed) |
-| Query API | http://localhost:8005 | REST API for knowledge retrieval |
+- `document-events`
+- `parsed-documents`
+- `extracted-claims`
+- `graph-updates`
+- `conflicts`
 
-**Example Usage**:
-```bash
-# Upload a document
-curl -X POST -F "file=@whitepaper.pdf" http://localhost:8001/documents
+Claim lifecycle:
 
-# Query extracted entities
-curl http://localhost:8005/entities?type=Technology
-
-# Find paths between two entities
-curl http://localhost:8005/paths/kubernetes/docker
+```mermaid
+stateDiagram-v2
+    [*] --> Extracted
+    Extracted --> Current: written to graph
+    Current --> Conflicting: disagreement detected
+    Conflicting --> Resolved: operator or strategy chooses winner
+    Resolved --> Current: truth cache refresh
+    Current --> Superseded: newer claim replaces it
+    Superseded --> [*]
 ```
 
-## Architecture Decisions
+## Quick Start
 
-**Why Kafka?** Decouples services; enables backpressure handling and replay on failure.
+Requirements:
 
-**Why Neo4j APOC?** Enables complex relationship queries (e.g., "all technologies transitively dependent on X") without custom code.
+- Docker Desktop
+- Docker Compose
+- Python 3.11+ if you want to run tests locally
 
-**Why Separate Services?** Each can be scaled independently; Parser may need more CPU, Extractor may need more memory.
-
-**Conflict Resolution?** Duplicate claim detection; conflicts topic allows manual review before Neo4j write.
-
-## Example: Claim Extraction
-
-**Input Document**: "Kubernetes requires Docker for containerization."
-
-**Extraction**:
-```
-Parsed: "Kubernetes requires Docker for containerization"
-Claim extracted: (Kubernetes, requires, Docker)
-  - Subject: Kubernetes
-  - Predicate: requires
-  - Object: Docker
-  - Confidence: 0.92
-  - Source: kubernetes-guide.pdf
-```
-
-**Graph Result**: Neo4j relationship `(Kubernetes)-[:REQUIRES]->(Docker)` with metadata (confidence, source)
-
-**Query**: `GET /paths/kubernetes/docker` returns path and all intermediate technologies.
-
-## Testing
+Start everything:
 
 ```bash
-# Unit tests
-cd services/[service]
-python -m pytest tests/
-
-# Integration tests
-docker-compose up -d
-python -m pytest tests/integration/
+make dev
 ```
 
-## Known Limitations
+Check service health:
 
-- Conflict resolution is logged but not auto-resolved; manual intervention required
-- Extraction accuracy depends on document quality and format
-- No built-in document versioning; updates replace prior versions
-- Scaling: Single Neo4j instance is bottleneck; cluster mode requires enterprise setup
+```bash
+make health
+```
 
-## Performance Characteristics
+Run the sample flow:
 
-| Metric | Typical | Notes |
-|--------|---------|-------|
-| Document ingestion latency | < 100ms | Upload + Kafka publish |
-| Extraction latency | 500ms–2s | Per document (depends on size) |
-| Graph write latency | 50–200ms | Per claim batch |
-| Query latency (simple) | 10–50ms | Redis-cached entity lookups |
-| Query latency (complex path) | 100–500ms | Neo4j APOC traversal |
+```bash
+make demo
+```
+
+That uploads `data/samples/acme_press_release.txt`, waits for the pipeline, searches graph-updater for `Acme`, then reads current truth for Acme Corporation.
+
+Run the richer story demo:
+
+```bash
+make story
+```
+
+That ingests every sample document, requeues duplicates if needed, then prints:
+
+- an entity dossier for Acme Corporation
+- a source impact report for the Acme sample source
+
+Stop services:
+
+```bash
+make down
+```
+
+## Manual API Flow
+
+Upload a document:
+
+```bash
+curl -X POST \
+  -F "file=@data/samples/acme_press_release.txt;type=text/plain" \
+  http://localhost:8001/ingest
+```
+
+Search graph-updater entities:
+
+```bash
+curl "http://localhost:8004/entity/search?query=Acme&limit=5"
+```
+
+Add a claim directly:
+
+```bash
+curl -X POST http://localhost:8004/claim \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject_entity_id": "ent_acme",
+    "predicate": "headquartered_in",
+    "object_value": "San Francisco",
+    "source_id": "src_demo",
+    "confidence": 0.95
+  }'
+```
+
+Read current truth:
+
+```bash
+curl http://localhost:8004/entity/ent_acme/truth
+```
+
+Read the evidence dossier:
+
+```bash
+curl http://localhost:8004/entity/ent_organization_acme_corporation/dossier
+```
+
+The dossier is the best beginner-facing object in the system. It shows the entity, current truth, supporting claims, source lineage, unresolved conflicts, a claim timeline, quality signals, and deterministic follow-up actions.
+
+Check the impact of one source:
+
+```bash
+curl http://localhost:8004/source/doc_b31c1921d6dd0aef/impact
+```
+
+This answers: if this source is wrong, which entities, claims, predicates, and conflicts are affected?
+
+List unresolved conflicts:
+
+```bash
+curl http://localhost:8004/conflicts
+```
+
+## Graph Updater Package
+
+The public container package is:
+
+```bash
+docker pull ghcr.io/d3v07/docweave/graph-updater:latest
+```
+
+Build it locally:
+
+```bash
+make graph-updater-image
+```
+
+The Python package path is `services.graph_updater`; the external service, image, and container names stay `graph-updater`.
+
+## Development
+
+Run checks:
+
+```bash
+make test
+```
+
+Graph-updater-specific files live in `services/graph_updater`.
+
+Important endpoints:
+
+- `GET /health`
+- `GET /ready`
+- `POST /entity`
+- `GET /entity/search`
+- `POST /claim`
+- `POST /claim/batch`
+- `GET /conflicts`
+- `POST /conflicts/{id}/resolve`
+- `GET /entity/{id}/truth`
+- `GET /entity/{id}/dossier`
+- `GET /source/{id}/impact`
+
+Admin endpoints require `X-API-Key` when configured.
+
+## System Design Direction
+
+See [docs/system-design.md](docs/system-design.md) for the fuller design map.
+
+DocWeave is closest to an evidence-first GraphRAG foundation:
+
+- It already follows the indexing spine: extract entities, relationships, and claims from raw text.
+- The graph-updater keeps source lineage and conflict state instead of flattening everything into a final answer.
+- Dossiers give local, entity-centered retrieval context: facts, evidence, source trust, conflicts, and next questions.
+- The next major leap is hybrid retrieval: combine exact graph traversal with full-text/vector retrieval over source chunks, then use the dossier as the grounded context package.
+
+Design influences:
+
+- [Microsoft GraphRAG indexing](https://microsoft.github.io/graphrag/index/overview/) describes extraction of entities, relationships, claims, community structure, and embeddings from text.
+- [Neo4j GraphRAG](https://neo4j.com/labs/genai-ecosystem/graphrag/) emphasizes graph-backed retrieval with source traceability and multi-hop context.
+- [OpenTelemetry messaging conventions](https://opentelemetry.io/docs/specs/semconv/messaging/) are the right reference point for future Kafka tracing and operator visibility.
+
+## Current Limits
+
+- The repo does not include a product dashboard source. Use the API and Grafana monitoring files for now.
+- Extraction is rule-based and works best on straightforward business text.
+- Embedding endpoints are optional; the default Docker image keeps them disabled unless `sentence-transformers` is added to a custom extractor image.
+- Neo4j runs as a single local instance in the default Compose setup.
+- Conflict resolution exists, but human review workflows are API-level in this version.
 
 ## License
 

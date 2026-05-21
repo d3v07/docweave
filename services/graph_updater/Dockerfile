@@ -4,7 +4,7 @@
 # Multi-stage build for optimized production image
 
 # Stage 1: Build dependencies
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -19,13 +19,13 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
-COPY services/graph-updater/requirements.txt /app/requirements.txt
+COPY services/graph_updater/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 
 # Stage 2: Production image
-FROM python:3.11-slim as production
+FROM python:3.11-slim AS production
 
 # Security: Run as non-root user
 RUN groupadd -r docweave && useradd -r -g docweave docweave
@@ -40,7 +40,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY shared /app/shared
 
 # Copy service code
-COPY services/graph-updater /app/services/graph_updater
+COPY services/graph_updater /app/services/graph_updater
 
 # Set ownership
 RUN chown -R docweave:docweave /app
@@ -73,7 +73,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 LABEL maintainer="DocWeave Team"
 LABEL version="0.4.0"
 LABEL description="DocWeave Graph Updater Service - Knowledge Graph and Conflict Resolution"
-LABEL org.opencontainers.image.source="https://github.com/docweave/docweave"
+LABEL org.opencontainers.image.source="https://github.com/d3v07/docweave"
 
 # Run the service with proper production settings
 # - Workers: 1 per service (scale with replicas, not workers for async)

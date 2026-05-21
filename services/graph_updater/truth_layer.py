@@ -43,6 +43,7 @@ class TruthValue:
         version: Version number for tracking changes
         metadata: Additional truth metadata
     """
+
     entity_id: str
     predicate: str
     value: Any
@@ -77,7 +78,11 @@ class TruthValue:
             confidence=data.get("confidence", 0.0),
             supporting_claim_ids=data.get("supporting_claim_ids", []),
             source_count=data.get("source_count", 0),
-            last_updated=datetime.fromisoformat(data["last_updated"]) if isinstance(data.get("last_updated"), str) else datetime.utcnow(),
+            last_updated=(
+                datetime.fromisoformat(data["last_updated"])
+                if isinstance(data.get("last_updated"), str)
+                else datetime.utcnow()
+            ),
             version=data.get("version", 1),
             metadata=data.get("metadata", {}),
         )
@@ -100,6 +105,7 @@ class EntityTruth:
         conflict_count: Number of unresolved conflicts
         computed_at: When this truth view was computed
     """
+
     entity_id: str
     entity_name: str
     entity_type: str
@@ -139,6 +145,7 @@ class HistoricalTruth:
     Supports point-in-time queries for auditing and
     historical analysis.
     """
+
     entity_id: str
     predicate: str
     value: Any
@@ -162,6 +169,7 @@ class HistoricalTruth:
 
 class TruthLayerConfig(BaseModel):
     """Configuration for the truth layer."""
+
     # Confidence aggregation
     use_weighted_confidence: bool = Field(default=True)
     min_truth_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
@@ -171,10 +179,17 @@ class TruthLayerConfig(BaseModel):
     enable_materialized_views: bool = Field(default=True)
 
     # Multi-value handling
-    single_value_predicates: list[str] = Field(default_factory=lambda: [
-        "ceo", "founded_date", "headquarters", "stock_ticker",
-        "employee_count", "annual_revenue", "date_of_birth"
-    ])
+    single_value_predicates: list[str] = Field(
+        default_factory=lambda: [
+            "ceo",
+            "founded_date",
+            "headquarters",
+            "stock_ticker",
+            "employee_count",
+            "annual_revenue",
+            "date_of_birth",
+        ]
+    )
 
     # Truth propagation
     propagate_on_resolution: bool = Field(default=True)
@@ -244,7 +259,9 @@ class TruthLayer:
         RETURN e.id as id, e.name as name, e.type as type
         """
 
-        entity_result = await self.client.execute_query(entity_query, {"entity_id": entity_id})
+        entity_result = await self.client.execute_query(
+            entity_query, {"entity_id": entity_id}
+        )
         if not entity_result.records:
             return None
 
@@ -267,7 +284,9 @@ class TruthLayer:
         RETURN predicate, claims
         """
 
-        claims_result = await self.client.execute_query(claims_query, {"entity_id": entity_id})
+        claims_result = await self.client.execute_query(
+            claims_query, {"entity_id": entity_id}
+        )
 
         # Build truth values
         truths = {}
@@ -286,8 +305,14 @@ class TruthLayer:
         RETURN count(r) as conflict_count
         """
 
-        conflicts_result = await self.client.execute_query(conflicts_query, {"entity_id": entity_id})
-        conflict_count = conflicts_result.records[0]["conflict_count"] if conflicts_result.records else 0
+        conflicts_result = await self.client.execute_query(
+            conflicts_query, {"entity_id": entity_id}
+        )
+        conflict_count = (
+            conflicts_result.records[0]["conflict_count"]
+            if conflicts_result.records
+            else 0
+        )
 
         entity_truth = EntityTruth(
             entity_id=entity_id,
@@ -353,11 +378,14 @@ class TruthLayer:
         LIMIT 1
         """
 
-        result = await self.client.execute_query(query, {
-            "entity_id": entity_id,
-            "predicate": predicate,
-            "as_of": as_of.isoformat(),
-        })
+        result = await self.client.execute_query(
+            query,
+            {
+                "entity_id": entity_id,
+                "predicate": predicate,
+                "as_of": as_of.isoformat(),
+            },
+        )
 
         if not result.records:
             return None
@@ -405,11 +433,14 @@ class TruthLayer:
         LIMIT $limit
         """
 
-        result = await self.client.execute_query(query, {
-            "entity_id": entity_id,
-            "predicate": predicate,
-            "limit": limit,
-        })
+        result = await self.client.execute_query(
+            query,
+            {
+                "entity_id": entity_id,
+                "predicate": predicate,
+                "limit": limit,
+            },
+        )
 
         return result.records
 
@@ -429,7 +460,10 @@ class TruthLayer:
         if entity_id in self._cache:
             del self._cache[entity_id]
 
-        return await self.get_entity_truth(entity_id, use_cache=False)
+        truth = await self.get_entity_truth(entity_id, use_cache=False)
+        if truth is None:
+            raise ValueError(f"Entity not found: {entity_id}")
+        return truth
 
     async def propagate_resolution(
         self,
@@ -551,8 +585,7 @@ class TruthLayer:
         if is_single_value:
             # Select best claim by confidence and recency
             best_claim = max(
-                claims,
-                key=lambda c: (c.get("confidence", 0), c.get("created_at", ""))
+                claims, key=lambda c: (c.get("confidence", 0), c.get("created_at", ""))
             )
 
             source_ids = set()
@@ -623,15 +656,18 @@ class TruthLayer:
         RETURN t.version as version
         """
 
-        await self.client.execute_query(query, {
-            "entity_id": truth_value.entity_id,
-            "predicate": truth_value.predicate,
-            "truth_id": f"truth_{uuid4().hex[:12]}",
-            "value": str(truth_value.value),
-            "confidence": truth_value.confidence,
-            "claim_ids": truth_value.supporting_claim_ids,
-            "source_count": truth_value.source_count,
-        })
+        await self.client.execute_query(
+            query,
+            {
+                "entity_id": truth_value.entity_id,
+                "predicate": truth_value.predicate,
+                "truth_id": f"truth_{uuid4().hex[:12]}",
+                "value": str(truth_value.value),
+                "confidence": truth_value.confidence,
+                "claim_ids": truth_value.supporting_claim_ids,
+                "source_count": truth_value.source_count,
+            },
+        )
 
     def invalidate_cache(self, entity_id: Optional[str] = None) -> None:
         """
@@ -649,8 +685,10 @@ class TruthLayer:
 
 # Pydantic models for API request/response
 
+
 class TruthQueryRequest(BaseModel):
     """Request to query truth values."""
+
     entity_id: str
     predicate: Optional[str] = None
     as_of: Optional[datetime] = None
@@ -658,6 +696,7 @@ class TruthQueryRequest(BaseModel):
 
 class TruthResponse(BaseModel):
     """Response containing truth value(s)."""
+
     entity_id: str
     entity_name: Optional[str] = None
     truths: dict[str, Any]
@@ -668,6 +707,7 @@ class TruthResponse(BaseModel):
 
 class HistoryResponse(BaseModel):
     """Response containing truth history."""
+
     entity_id: str
     predicate: str
     history: list[dict[str, Any]]

@@ -39,5 +39,5 @@ resources:
 
 # Image customization
 images:
-  - name: ghcr.io/docweave/docweave/graph-updater
+  - name: ghcr.io/d3v07/docweave/graph-updater
     newTag: latest

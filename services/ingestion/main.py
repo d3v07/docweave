@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     global kafka_producer, neo4j_client, storage, processor
 
     # Initialize storage
-    storage_path = os.environ.get("STORAGE_PATH", "/tmp/docweave/documents")
+    storage_path = os.environ.get("STORAGE_PATH", "/app/data/documents")
     storage = DocumentStorage(storage_path)
 
     # Initialize Kafka producer
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     # Cleanup
     await kafka_producer.stop()
     if neo4j_client:
-        neo4j_client.close()
+        await neo4j_client.close()
 
 
 app = FastAPI(

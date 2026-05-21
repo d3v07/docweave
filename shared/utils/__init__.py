@@ -1,35 +1,21 @@
-"""
-DocWeave Utilities Module
-=========================
+"""Shared utility clients for DocWeave services."""
 
-This module provides utility functions and clients for common operations
-across DocWeave services, including Kafka messaging and Neo4j graph operations.
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
-Usage:
-    from shared.utils import KafkaClient, Neo4jClient
-
-    # Kafka operations
-    kafka = KafkaClient()
-    await kafka.produce("topic", {"key": "value"})
-
-    # Neo4j operations
-    neo4j = Neo4jClient()
-    result = await neo4j.execute_query("MATCH (n) RETURN n LIMIT 10")
-"""
-
-from shared.utils.kafka_client import (
-    KafkaClient,
-    KafkaProducer,
-    KafkaConsumer,
-    KafkaMessage,
-    KafkaTopics,
-)
-
-from shared.utils.neo4j_client import (
-    Neo4jClient,
-    Neo4jConnectionPool,
-    Neo4jQueryBuilder,
-)
+if TYPE_CHECKING:
+    from shared.utils.kafka_client import (
+        KafkaClient,
+        KafkaConsumer,
+        KafkaMessage,
+        KafkaProducer,
+        KafkaTopics,
+    )
+    from shared.utils.neo4j_client import (
+        Neo4jClient,
+        Neo4jConnectionPool,
+        Neo4jQueryBuilder,
+    )
 
 __all__ = [
     # Kafka utilities
@@ -43,3 +29,15 @@ __all__ = [
     "Neo4jConnectionPool",
     "Neo4jQueryBuilder",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in {"KafkaClient", "KafkaProducer", "KafkaConsumer", "KafkaMessage", "KafkaTopics"}:
+        kafka_client = import_module("shared.utils.kafka_client")
+        return getattr(kafka_client, name)
+
+    if name in {"Neo4jClient", "Neo4jConnectionPool", "Neo4jQueryBuilder"}:
+        neo4j_client = import_module("shared.utils.neo4j_client")
+        return getattr(neo4j_client, name)
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -42,8 +42,11 @@ neo4j_client: Optional[Neo4jClient] = None
 async def lifespan(app: FastAPI):
     global neo4j_client
     neo4j_client = Neo4jClient()
-    yield
-    neo4j_client.close()
+    await neo4j_client.init()
+    try:
+        yield
+    finally:
+        await neo4j_client.close()
 
 
 app = FastAPI(
@@ -65,7 +68,7 @@ async def health_check():
 
 @app.get("/ready")
 async def readiness_check():
-    neo4j_ok = neo4j_client.health_check() if neo4j_client else False
+    neo4j_ok = await neo4j_client.health_check() if neo4j_client else False
     return {
         "ready": neo4j_ok,
         "checks": {"neo4j": neo4j_ok},
@@ -86,12 +89,12 @@ async def search_entities(
     query = """
     MATCH (e:Entity)
     WHERE e.name CONTAINS $search_term
-       OR ANY(alias IN e.aliases WHERE alias CONTAINS $search_term)
+       OR ANY(alias IN coalesce(e.aliases, []) WHERE alias CONTAINS $search_term)
     """
     if entity_type:
         query += " AND e.type = $entity_type"
     query += """
-    OPTIONAL MATCH (e)-[:HAS_CLAIM]->(c:Claim {status: 'CURRENT'})
+    OPTIONAL MATCH (e)-[:HAS_CLAIM]->(c:Claim {status: 'current'})
     RETURN e.id as id, e.name as name, e.type as type,
            collect({predicate: c.predicate, value: c.object_value}) as claims
     LIMIT $limit
@@ -101,7 +104,8 @@ async def search_entities(
     if entity_type:
         params["entity_type"] = entity_type
 
-    results = neo4j_client.execute_query(query, **params) if neo4j_client else []
+    result = await neo4j_client.execute_query(query, params) if neo4j_client else None
+    results = result.records if result else []
 
     entities = [
         EntityResult(
@@ -127,7 +131,7 @@ async def get_entity(entity_id: str):
     """Get entity details with all current claims."""
     query = """
     MATCH (e:Entity {id: $entity_id})
-    OPTIONAL MATCH (e)-[:HAS_CLAIM]->(c:Claim {status: 'CURRENT'})
+    OPTIONAL MATCH (e)-[:HAS_CLAIM]->(c:Claim {status: 'current'})
     OPTIONAL MATCH (c)-[:SOURCED_FROM]->(s:Source)
     RETURN e.id as id, e.name as name, e.type as type, e.aliases as aliases,
            collect({
@@ -139,7 +143,8 @@ async def get_entity(entity_id: str):
            }) as claims
     """
 
-    results = neo4j_client.execute_query(query, entity_id=entity_id) if neo4j_client else []
+    result = await neo4j_client.execute_query(query, {"entity_id": entity_id}) if neo4j_client else None
+    results = result.records if result else []
 
     if not results:
         return {"error": "Entity not found"}
@@ -170,15 +175,15 @@ async def ask_question(q: str = Query(..., description="Natural language questio
             query = """
             MATCH (e:Entity)
             WHERE toLower(e.name) CONTAINS toLower($term)
-            OPTIONAL MATCH (e)-[:HAS_CLAIM]->(c:Claim {status: 'CURRENT'})
+            OPTIONAL MATCH (e)-[:HAS_CLAIM]->(c:Claim {status: 'current'})
             OPTIONAL MATCH (c)-[:SOURCED_FROM]->(s:Source)
             RETURN e.name as entity, c.predicate as predicate,
                    c.object_value as value, c.confidence as confidence,
                    s.uri as source
             LIMIT 5
             """
-            results = neo4j_client.execute_query(query, term=word) if neo4j_client else []
-            entity_results.extend(results)
+            result = await neo4j_client.execute_query(query, {"term": word}) if neo4j_client else None
+            entity_results.extend(result.records if result else [])
 
     if not entity_results:
         return AnswerResult(

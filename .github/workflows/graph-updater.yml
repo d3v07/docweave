@@ -12,7 +12,7 @@ on:
       - main
       - develop
     paths:
-      - 'services/graph-updater/**'
+      - 'services/graph_updater/**'
       - 'shared/**'
       - '.github/workflows/graph-updater.yml'
   pull_request:
@@ -20,7 +20,7 @@ on:
       - main
       - develop
     paths:
-      - 'services/graph-updater/**'
+      - 'services/graph_updater/**'
       - 'shared/**'
   workflow_dispatch:
     inputs:
@@ -74,18 +74,18 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
           cache-dependency-path: |
-            services/graph-updater/requirements.txt
+            services/graph_updater/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r services/graph-updater/requirements.txt
+          pip install -r services/graph_updater/requirements.txt
           pip install pytest pytest-asyncio
 
       - name: Run tests
         run: |
-          cp services/graph-updater/tests/test_graph_updater.py /tmp/test_graph_updater.py
-          pytest /tmp/test_graph_updater.py -v --tb=short
+          python -m compileall -q services/graph_updater shared
+          pytest services/graph_updater/tests -v --tb=short
 
   # ===========================================================================
   # Lint Job - Code quality checks
@@ -108,27 +108,24 @@ jobs:
       - name: Install linting tools
         run: |
           python -m pip install --upgrade pip
+          pip install -r services/graph_updater/requirements.txt
           pip install ruff mypy black isort
 
       - name: Run Ruff linter
         run: |
-          ruff check services/graph-updater/ --output-format=github
-        continue-on-error: true
+          ruff check services/graph_updater/*.py --output-format=github
 
       - name: Check formatting with Black
         run: |
-          black --check services/graph-updater/
-        continue-on-error: true
+          black --check services/graph_updater/*.py
 
       - name: Check import sorting with isort
         run: |
-          isort --check-only services/graph-updater/
-        continue-on-error: true
+          isort --check-only services/graph_updater/*.py
 
       - name: Type check with mypy
         run: |
-          mypy services/graph-updater/ --ignore-missing-imports --no-error-summary
-        continue-on-error: true
+          mypy services/graph_updater/*.py --ignore-missing-imports --no-error-summary
 
   # ===========================================================================
   # Security Scan Job
@@ -155,12 +152,12 @@ jobs:
 
       - name: Run Bandit security scan
         run: |
-          bandit -r services/graph-updater/ -f json -o bandit-results.json --exit-zero
-          bandit -r services/graph-updater/ -f txt --exit-zero
+          bandit services/graph_updater/*.py -f json -o bandit-results.json
+          bandit services/graph_updater/*.py -f txt
 
       - name: Check dependencies for vulnerabilities
         run: |
-          pip-audit -r services/graph-updater/requirements.txt --desc || true
+          pip-audit -r services/graph_updater/requirements.txt --desc
 
       - name: Upload security scan results
         uses: actions/upload-artifact@v4
@@ -177,7 +174,7 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [test, lint]
+    needs: [test, lint, security]
     permissions:
       contents: read
       packages: write
@@ -218,7 +215,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: services/graph-updater/Dockerfile
+          file: services/graph_updater/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -236,4 +233,3 @@ jobs:
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:** ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo "**Digest:** ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
-

@@ -44,6 +44,7 @@ class GraphUpdaterError(Exception):
 # Entity Exceptions
 class EntityError(GraphUpdaterError):
     """Base exception for entity-related errors."""
+
     pass
 
 
@@ -99,6 +100,7 @@ class DuplicateEntityError(EntityError):
 # Claim Exceptions
 class ClaimError(GraphUpdaterError):
     """Base exception for claim-related errors."""
+
     pass
 
 
@@ -143,6 +145,7 @@ class ClaimSupersededError(ClaimError):
 # Conflict Exceptions
 class ConflictError(GraphUpdaterError):
     """Base exception for conflict-related errors."""
+
     pass
 
 
@@ -203,6 +206,7 @@ class ResolutionFailedError(ConflictError):
 # Truth Layer Exceptions
 class TruthLayerError(GraphUpdaterError):
     """Base exception for truth layer errors."""
+
     pass
 
 
@@ -241,6 +245,7 @@ class TruthComputationError(TruthLayerError):
 # Source Exceptions
 class SourceError(GraphUpdaterError):
     """Base exception for source-related errors."""
+
     pass
 
 
@@ -259,6 +264,7 @@ class SourceNotFoundError(SourceError):
 # Database Exceptions
 class DatabaseError(GraphUpdaterError):
     """Base exception for database-related errors."""
+
     pass
 
 
@@ -303,6 +309,7 @@ class TransactionError(DatabaseError):
 # Kafka Exceptions
 class KafkaError(GraphUpdaterError):
     """Base exception for Kafka-related errors."""
+
     pass
 
 

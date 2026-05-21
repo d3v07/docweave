@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 class EntityMergeRequest(BaseModel):
     """Request to merge entities."""
+
     target_entity_id: str
     source_entity_ids: list[str]
     merge_aliases: bool = Field(default=True)
@@ -34,6 +35,7 @@ class EntityMergeRequest(BaseModel):
 
 class EntityMergeResult(BaseModel):
     """Result of an entity merge operation."""
+
     target_entity_id: str
     merged_entity_ids: list[str]
     aliases_added: list[str]
@@ -45,6 +47,7 @@ class EntityMergeResult(BaseModel):
 
 class ClaimVersionInfo(BaseModel):
     """Information about a claim version."""
+
     claim_id: str
     version: int
     status: str
@@ -172,7 +175,7 @@ class GraphOperations:
                     "entity_id": entity_id,
                     "aliases": list(set(aliases)),
                     "properties": properties,
-                }
+                },
             )
         except Exception:
             # Fallback without APOC
@@ -183,7 +186,7 @@ class GraphOperations:
                     "type": entity_type,
                     "entity_id": entity_id,
                     "aliases": list(set(aliases)),
-                }
+                },
             )
 
         return result.records[0]["id"] if result.records else entity_id
@@ -247,7 +250,10 @@ class GraphOperations:
                     """
                     await self.client.execute_query(
                         update_query,
-                        {"target_id": target_entity_id, "aliases": list(set(aliases_added))}
+                        {
+                            "target_id": target_entity_id,
+                            "aliases": list(set(aliases_added)),
+                        },
                     )
 
             # Transfer claims to target entity
@@ -262,9 +268,13 @@ class GraphOperations:
                 """
                 transfer_result = await self.client.execute_query(
                     transfer_query,
-                    {"source_ids": source_entity_ids, "target_id": target_entity_id}
+                    {"source_ids": source_entity_ids, "target_id": target_entity_id},
                 )
-                claims_transferred = transfer_result.records[0]["count"] if transfer_result.records else 0
+                claims_transferred = (
+                    transfer_result.records[0]["count"]
+                    if transfer_result.records
+                    else 0
+                )
 
             # Update other relationships pointing to source entities
             relationship_query = """
@@ -279,9 +289,11 @@ class GraphOperations:
             """
             rel_result = await self.client.execute_query(
                 relationship_query,
-                {"source_ids": source_entity_ids, "target_id": target_entity_id}
+                {"source_ids": source_entity_ids, "target_id": target_entity_id},
             )
-            relationships_updated = rel_result.records[0]["count"] if rel_result.records else 0
+            relationships_updated = (
+                rel_result.records[0]["count"] if rel_result.records else 0
+            )
 
             # Mark source entities as merged
             mark_query = """
@@ -299,8 +311,8 @@ class GraphOperations:
                 {
                     "source_ids": source_entity_ids,
                     "target_id": target_entity_id,
-                    "resolved_by": resolved_by
-                }
+                    "resolved_by": resolved_by,
+                },
             )
 
             # Update target entity's merged_from list
@@ -313,7 +325,7 @@ class GraphOperations:
             """
             await self.client.execute_query(
                 update_merged_query,
-                {"target_id": target_entity_id, "source_ids": source_entity_ids}
+                {"target_id": target_entity_id, "source_ids": source_entity_ids},
             )
 
             return EntityMergeResult(
@@ -412,8 +424,24 @@ class GraphOperations:
         metadata = metadata or {}
 
         query = """
-        MATCH (e:Entity {id: $subject_entity_id})
-        MATCH (s:Source {id: $source_id})
+        MERGE (e:Entity {id: $subject_entity_id})
+        ON CREATE SET
+            e.name = $subject_entity_id,
+            e.type = 'UNKNOWN',
+            e.aliases = [],
+            e.created_at = datetime(),
+            e.updated_at = datetime()
+        ON MATCH SET
+            e.updated_at = datetime()
+        MERGE (s:Source {id: $source_id})
+        ON CREATE SET
+            s.uri = $source_id,
+            s.source_type = 'DOCUMENT',
+            s.reliability_score = 0.8,
+            s.created_at = datetime(),
+            s.updated_at = datetime()
+        ON MATCH SET
+            s.updated_at = datetime()
         CREATE (c:Claim {
             id: $claim_id,
             predicate: $predicate,
@@ -448,23 +476,32 @@ class GraphOperations:
         if valid_until:
             await self.client.execute_query(
                 "MATCH (c:Claim {id: $claim_id}) SET c.valid_until = datetime($valid_until)",
-                {"claim_id": claim_id, "valid_until": valid_until.isoformat()}
+                {"claim_id": claim_id, "valid_until": valid_until.isoformat()},
             )
 
         # If object_entity_id is provided, create relationship
         if object_entity_id:
             rel_query = """
             MATCH (c:Claim {id: $claim_id})
-            MATCH (target:Entity {id: $object_entity_id})
-            CREATE (c)-[:REFERS_TO]->(target)
+            MERGE (target:Entity {id: $object_entity_id})
+            ON CREATE SET
+                target.name = $object_entity_id,
+                target.type = 'UNKNOWN',
+                target.aliases = [],
+                target.created_at = datetime(),
+                target.updated_at = datetime()
+            ON MATCH SET
+                target.updated_at = datetime()
+            MERGE (c)-[:REFERS_TO]->(target)
             SET c.object_entity_id = $object_entity_id
             """
             await self.client.execute_query(
-                rel_query,
-                {"claim_id": claim_id, "object_entity_id": object_entity_id}
+                rel_query, {"claim_id": claim_id, "object_entity_id": object_entity_id}
             )
 
-        logger.debug(f"Added claim {claim_id}: {subject_entity_id}.{predicate} = {object_value}")
+        logger.debug(
+            f"Added claim {claim_id}: {subject_entity_id}.{predicate} = {object_value}"
+        )
         return claim_id
 
     async def add_claim_versioned(
@@ -513,7 +550,7 @@ class GraphOperations:
                     "entity_id": subject_entity_id,
                     "predicate": predicate,
                     "object_value": str(object_value),
-                }
+                },
             )
 
             superseded_ids = [r["id"] for r in existing_result.records]
@@ -539,8 +576,7 @@ class GraphOperations:
                 c.valid_until = datetime()
             """
             await self.client.execute_query(
-                supersede_query,
-                {"claim_ids": superseded_ids, "new_claim_id": claim_id}
+                supersede_query, {"claim_ids": superseded_ids, "new_claim_id": claim_id}
             )
 
             # Create supersedes relationships
@@ -590,15 +626,17 @@ class GraphOperations:
 
         versions = []
         for i, record in enumerate(result.records):
-            versions.append(ClaimVersionInfo(
-                claim_id=record["id"],
-                version=record.get("version") or (len(result.records) - i),
-                status=record.get("status", "unknown"),
-                object_value=record["value"],
-                confidence=record.get("confidence", 0.0),
-                created_at=str(record.get("created_at", "")),
-                superseded_by=record.get("superseded_by"),
-            ))
+            versions.append(
+                ClaimVersionInfo(
+                    claim_id=record["id"],
+                    version=record.get("version") or (len(result.records) - i),
+                    status=record.get("status", "unknown"),
+                    object_value=record["value"],
+                    confidence=record.get("confidence", 0.0),
+                    created_at=str(record.get("created_at", "")),
+                    superseded_by=record.get("superseded_by"),
+                )
+            )
 
         return versions
 
@@ -639,8 +677,8 @@ class GraphOperations:
             {
                 "subject_entity_id": subject_entity_id,
                 "predicate": predicate,
-                "object_value": str(object_value)
-            }
+                "object_value": str(object_value),
+            },
         )
 
         return result.records
@@ -675,8 +713,12 @@ class GraphOperations:
 
         # Add the new claim
         claim_id = await self.add_claim(
-            subject_entity_id, predicate, object_value,
-            source_id, confidence, extracted_text
+            subject_entity_id,
+            predicate,
+            object_value,
+            source_id,
+            confidence,
+            extracted_text,
         )
 
         # Create conflict relationships
@@ -687,7 +729,7 @@ class GraphOperations:
             # Update claim status to conflicting
             await self.client.execute_query(
                 "MATCH (c:Claim {id: $claim_id}) SET c.status = 'conflicting'",
-                {"claim_id": claim_id}
+                {"claim_id": claim_id},
             )
 
         return claim_id, conflicts
@@ -730,7 +772,7 @@ class GraphOperations:
                 "claim2_id": claim2_id,
                 "conflict_id": conflict_id,
                 "conflict_type": conflict_type,
-            }
+            },
         )
 
         return conflict_id
@@ -751,7 +793,7 @@ class GraphOperations:
             List of conflict records
         """
         entity_filter = ""
-        params = {"limit": limit}
+        params: dict[str, Any] = {"limit": limit}
 
         if entity_id:
             entity_filter = """
@@ -816,7 +858,7 @@ class GraphOperations:
                 "winning_claim_id": winning_claim_id,
                 "reason": resolution_reason,
                 "resolved_by": resolved_by,
-            }
+            },
         )
 
         logger.info(f"Resolved conflict {conflict_id}: winner={winning_claim_id}")
@@ -876,7 +918,9 @@ class GraphOperations:
         Returns:
             List of claims ordered by creation date
         """
-        status_filter = "" if include_superseded else "AND c.status IN ['current', 'CURRENT']"
+        status_filter = (
+            "" if include_superseded else "AND c.status IN ['current', 'CURRENT']"
+        )
 
         query = f"""
         MATCH (e:Entity {{id: $entity_id}})-[:HAS_CLAIM]->(c:Claim {{predicate: $predicate}})
@@ -954,6 +998,5 @@ class GraphOperations:
         """
 
         await self.client.execute_query(
-            query,
-            {"source_id": source_id, "reliability_score": reliability_score}
+            query, {"source_id": source_id, "reliability_score": reliability_score}
         )

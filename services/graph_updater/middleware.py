@@ -15,11 +15,12 @@ import time
 import uuid
 from contextvars import ContextVar
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "method": request.method,
                 "path": request.url.path,
                 "query_params": str(request.query_params),
-            }
+            },
         )
 
         try:
@@ -98,7 +99,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     "path": request.url.path,
                     "status_code": response.status_code,
                     "duration_ms": duration_ms,
-                }
+                },
             )
 
             # Add timing header
@@ -139,15 +140,14 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
 
         except Exception as e:
             logger.exception(
-                f"Unhandled exception: {e}",
-                extra={"correlation_id": correlation_id}
+                f"Unhandled exception: {e}", extra={"correlation_id": correlation_id}
             )
 
             return JSONResponse(
                 status_code=500,
                 content={
                     "error": "Internal Server Error",
-                    "message": str(e) if not isinstance(e, Exception) else "An unexpected error occurred",
+                    "message": "An unexpected error occurred",
                     "correlation_id": correlation_id,
                     "timestamp": datetime.utcnow().isoformat(),
                 },
@@ -165,7 +165,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app: FastAPI,
+        app: ASGIApp,
         requests_per_minute: int = 100,
         burst_limit: int = 20,
     ):
@@ -201,7 +201,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "error": "Too Many Requests",
                     "message": f"Rate limit exceeded. Maximum {self.requests_per_minute} requests per minute.",
                     "correlation_id": correlation_id,
-                    "retry_after_seconds": self._get_retry_after(client_ip, current_time),
+                    "retry_after_seconds": self._get_retry_after(
+                        client_ip, current_time
+                    ),
                 },
                 headers={
                     "X-Correlation-ID": correlation_id,
@@ -218,7 +220,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         remaining = self._get_remaining(client_ip, current_time)
         response.headers["X-RateLimit-Limit"] = str(self.requests_per_minute)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(int(current_time + self._window_seconds))
+        response.headers["X-RateLimit-Reset"] = str(
+            int(current_time + self._window_seconds)
+        )
 
         return response
 

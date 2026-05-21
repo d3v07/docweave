@@ -13,6 +13,8 @@ The consumer:
 """
 
 import asyncio
+import inspect
+import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
@@ -68,9 +70,12 @@ class ClaimProcessor:
         Returns:
             Processing result with claim ID and any conflicts
         """
-        logger.info(f"Processing claim: {claim_data.get('id', 'unknown')}")
-
         try:
+            if isinstance(claim_data, str):
+                claim_data = json.loads(claim_data)
+
+            logger.info(f"Processing claim: {claim_data.get('id', 'unknown')}")
+
             # Validate required fields
             validation_result = self._validate_claim(claim_data)
             if not validation_result["valid"]:
@@ -103,7 +108,11 @@ class ClaimProcessor:
                     await self._publish_conflict_events(conflicts)
 
             # Update truth layer
-            await self.truth_layer.invalidate_cache(normalized["subject_entity_id"])
+            cache_result = self.truth_layer.invalidate_cache(
+                normalized["subject_entity_id"]
+            )
+            if inspect.isawaitable(cache_result):
+                await cache_result
 
             result = {
                 "status": "processed",
@@ -113,14 +122,18 @@ class ClaimProcessor:
                 "processed_at": datetime.utcnow().isoformat(),
             }
 
-            logger.info(f"Processed claim {claim_id}: {len(conflicts)} conflicts detected")
+            logger.info(
+                f"Processed claim {claim_id}: {len(conflicts)} conflicts detected"
+            )
             return result
 
         except Exception as e:
             logger.error(f"Error processing claim: {e}", exc_info=True)
             return {
                 "status": "error",
-                "claim_id": claim_data.get("id"),
+                "claim_id": (
+                    claim_data.get("id") if isinstance(claim_data, dict) else None
+                ),
                 "reason": str(e),
             }
 
@@ -136,7 +149,12 @@ class ClaimProcessor:
         """
         errors = []
 
-        required_fields = ["subject_entity_id", "predicate", "object_value", "source_id"]
+        required_fields = [
+            "subject_entity_id",
+            "predicate",
+            "object_value",
+            "source_id",
+        ]
         for field in required_fields:
             if not claim_data.get(field):
                 errors.append(f"Missing required field: {field}")
@@ -158,6 +176,9 @@ class ClaimProcessor:
         Returns:
             Normalized claim data
         """
+        if claim_data.get("claim_id") and not claim_data.get("id"):
+            claim_data["id"] = claim_data["claim_id"]
+
         # Ensure claim has an ID
         if not claim_data.get("id"):
             claim_data["id"] = f"claim_{uuid4().hex[:12]}"
@@ -197,8 +218,24 @@ class ClaimProcessor:
         status = "conflicting" if conflicts else "current"
 
         query = """
-        MATCH (e:Entity {id: $subject_entity_id})
-        MATCH (s:Source {id: $source_id})
+        MERGE (e:Entity {id: $subject_entity_id})
+        ON CREATE SET
+            e.name = $subject_name,
+            e.type = $subject_entity_type,
+            e.aliases = [],
+            e.created_at = datetime(),
+            e.updated_at = datetime()
+        ON MATCH SET
+            e.updated_at = datetime()
+        MERGE (s:Source {id: $source_id})
+        ON CREATE SET
+            s.uri = $source_uri,
+            s.source_type = $source_type,
+            s.reliability_score = $source_reliability,
+            s.created_at = datetime(),
+            s.updated_at = datetime()
+        ON MATCH SET
+            s.updated_at = datetime()
         MERGE (c:Claim {id: $claim_id})
         ON CREATE SET
             c.predicate = $predicate,
@@ -206,6 +243,7 @@ class ClaimProcessor:
             c.confidence = $confidence,
             c.extracted_text = $extracted_text,
             c.status = $status,
+            c.version = 1,
             c.created_at = datetime(),
             c.valid_from = datetime($valid_from)
         ON MATCH SET
@@ -215,17 +253,55 @@ class ClaimProcessor:
         RETURN c.id as id
         """
 
-        result = await self.graph_ops.client.execute_query(query, {
-            "subject_entity_id": claim_data["subject_entity_id"],
-            "source_id": claim_data["source_id"],
-            "claim_id": claim_data["id"],
-            "predicate": claim_data["predicate"],
-            "object_value": str(claim_data["object_value"]),
-            "confidence": claim_data["confidence"],
-            "extracted_text": claim_data.get("extracted_text", ""),
-            "status": status,
-            "valid_from": claim_data.get("valid_from", datetime.utcnow().isoformat()),
-        })
+        await self.graph_ops.client.execute_query(
+            query,
+            {
+                "subject_entity_id": claim_data["subject_entity_id"],
+                "subject_name": claim_data.get("subject_name")
+                or claim_data["subject_entity_id"],
+                "subject_entity_type": claim_data.get("subject_entity_type", "UNKNOWN"),
+                "source_id": claim_data["source_id"],
+                "source_uri": claim_data.get("source_uri") or claim_data["source_id"],
+                "source_type": claim_data.get("source_type", "DOCUMENT"),
+                "source_reliability": float(claim_data.get("source_reliability", 0.8)),
+                "claim_id": claim_data["id"],
+                "predicate": claim_data["predicate"],
+                "object_value": str(claim_data["object_value"]),
+                "confidence": claim_data["confidence"],
+                "extracted_text": claim_data.get("extracted_text", ""),
+                "status": status,
+                "valid_from": claim_data.get(
+                    "valid_from", datetime.utcnow().isoformat()
+                ),
+            },
+        )
+
+        if claim_data.get("object_entity_id"):
+            await self.graph_ops.client.execute_query(
+                """
+                MATCH (c:Claim {id: $claim_id})
+                MERGE (target:Entity {id: $object_entity_id})
+                ON CREATE SET
+                    target.name = $object_name,
+                    target.type = $object_entity_type,
+                    target.aliases = [],
+                    target.created_at = datetime(),
+                    target.updated_at = datetime()
+                ON MATCH SET
+                    target.updated_at = datetime()
+                MERGE (c)-[:REFERS_TO]->(target)
+                SET c.object_entity_id = $object_entity_id
+                """,
+                {
+                    "claim_id": claim_data["id"],
+                    "object_entity_id": claim_data["object_entity_id"],
+                    "object_name": claim_data.get("object_name")
+                    or str(claim_data["object_value"]),
+                    "object_entity_type": claim_data.get(
+                        "object_entity_type", "UNKNOWN"
+                    ),
+                },
+            )
 
         return claim_data["id"]
 
@@ -263,14 +339,17 @@ class ClaimProcessor:
                 RETURN r.id as id
                 """
 
-                await self.graph_ops.client.execute_query(query, {
-                    "claim1_id": new_claim_id,
-                    "claim2_id": existing_claim_id,
-                    "conflict_id": conflict_id,
-                    "conflict_type": conflict.conflict_type.value,
-                    "severity": conflict.severity.value,
-                    "score": conflict.score,
-                })
+                await self.graph_ops.client.execute_query(
+                    query,
+                    {
+                        "claim1_id": new_claim_id,
+                        "claim2_id": existing_claim_id,
+                        "conflict_id": conflict_id,
+                        "conflict_type": conflict.conflict_type.value,
+                        "severity": conflict.severity.value,
+                        "score": conflict.score,
+                    },
+                )
 
         return conflict_id
 
@@ -440,7 +519,7 @@ class ClaimsConsumer:
                 return
             except Exception as e:
                 last_error = e
-                delay = base_delay * (2 ** attempt)
+                delay = base_delay * (2**attempt)
                 logger.warning(
                     f"Failed to start Kafka {client_name} (attempt {attempt + 1}/{max_retries}): {e}. "
                     f"Retrying in {delay:.1f}s..."
@@ -486,20 +565,29 @@ class ClaimsConsumer:
         await self._cleanup()
         self._status = self.STATUS_STOPPED
 
-        logger.info(f"Claims consumer stopped. Processed: {self._processed_count}, Errors: {self._error_count}")
+        logger.info(
+            f"Claims consumer stopped. Processed: {self._processed_count}, Errors: {self._error_count}"
+        )
 
     async def _consume_loop(self) -> None:
         """Main consumption loop."""
         logger.info("Starting consumption loop")
 
         try:
-            async for message in self._consumer.consume():
+            if not self._consumer or not self._processor:
+                logger.warning("Claims consumer loop started before initialization")
+                return
+
+            consumer = self._consumer
+            processor = self._processor
+
+            async for message in consumer.consume():
                 if not self._running:
                     break
 
                 try:
                     claim_data = message.value
-                    result = await self._processor.process_claim(claim_data)
+                    result = await processor.process_claim(claim_data)
 
                     if result["status"] == "processed":
                         self._processed_count += 1
@@ -619,8 +707,10 @@ class GraphUpdateConsumer:
             if self._consumer:
                 try:
                     await self._consumer.stop()
-                except Exception:
-                    pass
+                except Exception as cleanup_error:
+                    logger.warning(
+                        f"Error stopping graph update consumer after startup failure: {cleanup_error}"
+                    )
                 self._consumer = None
             raise
 
@@ -648,7 +738,7 @@ class GraphUpdateConsumer:
                 return
             except Exception as e:
                 last_error = e
-                delay = base_delay * (2 ** attempt)
+                delay = base_delay * (2**attempt)
                 logger.warning(
                     f"Failed to start Kafka {client_name} (attempt {attempt + 1}/{max_retries}): {e}. "
                     f"Retrying in {delay:.1f}s..."
@@ -690,7 +780,15 @@ class GraphUpdateConsumer:
         logger.info("Starting graph update consumption loop")
 
         try:
-            async for message in self._consumer.consume():
+            if not self._consumer:
+                logger.warning(
+                    "Graph update consumer loop started before initialization"
+                )
+                return
+
+            consumer = self._consumer
+
+            async for message in consumer.consume():
                 if not self._running:
                     break
 
@@ -702,7 +800,9 @@ class GraphUpdateConsumer:
         except asyncio.CancelledError:
             logger.info("Graph update consumption loop cancelled")
         except Exception as e:
-            logger.error(f"Fatal error in graph update consumption loop: {e}", exc_info=True)
+            logger.error(
+                f"Fatal error in graph update consumption loop: {e}", exc_info=True
+            )
             self._running = False
             self._status = self.STATUS_ERROR
             self._last_error = str(e)
@@ -734,12 +834,12 @@ class GraphUpdateConsumer:
 
         # Invalidate truth cache for all involved entities
         for entity_id in [target_id] + source_ids:
-            self._truth_layer.invalidate_cache(entity_id)
+            await self._invalidate_truth_cache(entity_id)
 
     async def _handle_claim_superseded(self, event: dict[str, Any]) -> None:
         """Handle claim superseded event."""
         entity_id = event.get("entity_id")
-        self._truth_layer.invalidate_cache(entity_id)
+        await self._invalidate_truth_cache(entity_id)
 
     async def _handle_conflict_resolved(self, event: dict[str, Any]) -> None:
         """Handle conflict resolution event."""
@@ -751,6 +851,11 @@ class GraphUpdateConsumer:
             await self._truth_layer.propagate_resolution(
                 entity_id, predicate, winning_claim_id
             )
+
+    async def _invalidate_truth_cache(self, entity_id: Optional[str]) -> None:
+        result = self._truth_layer.invalidate_cache(entity_id)
+        if inspect.isawaitable(result):
+            await result
 
     def get_stats(self) -> dict[str, Any]:
         """

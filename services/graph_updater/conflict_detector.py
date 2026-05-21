@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -25,14 +25,18 @@ logger = logging.getLogger(__name__)
 
 class ConflictType(str, Enum):
     """Types of conflicts that can be detected between claims."""
+
     VALUE_MISMATCH = "value_mismatch"
     TEMPORAL = "temporal"
     SEMANTIC = "semantic"
-    CARDINALITY = "cardinality"  # When predicate should have single value but has multiple
+    CARDINALITY = (
+        "cardinality"  # When predicate should have single value but has multiple
+    )
 
 
 class ConflictSeverity(str, Enum):
     """Severity levels for detected conflicts."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -58,6 +62,7 @@ class DetectedConflict:
         detected_at: When the conflict was detected
         metadata: Additional conflict metadata
     """
+
     id: str
     conflict_type: ConflictType
     claim_ids: list[str]
@@ -102,13 +107,18 @@ class DetectedConflict:
             source_ids=data.get("source_ids", []),
             severity=ConflictSeverity(data.get("severity", "medium")),
             score=data.get("score", 1.0),
-            detected_at=datetime.fromisoformat(data["detected_at"]) if isinstance(data.get("detected_at"), str) else datetime.utcnow(),
+            detected_at=(
+                datetime.fromisoformat(data["detected_at"])
+                if isinstance(data.get("detected_at"), str)
+                else datetime.utcnow()
+            ),
             metadata=data.get("metadata", {}),
         )
 
 
 class ConflictDetectorConfig(BaseModel):
     """Configuration for the conflict detector."""
+
     # Value mismatch detection
     enable_value_mismatch: bool = Field(default=True)
     value_similarity_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
@@ -126,10 +136,17 @@ class ConflictDetectorConfig(BaseModel):
     confidence_difference_threshold: float = Field(default=0.1, ge=0.0, le=1.0)
 
     # Predicates that should have single values (cardinality = 1)
-    single_value_predicates: list[str] = Field(default_factory=lambda: [
-        "ceo", "founded_date", "headquarters", "employee_count",
-        "annual_revenue", "stock_ticker", "date_of_birth"
-    ])
+    single_value_predicates: list[str] = Field(
+        default_factory=lambda: [
+            "ceo",
+            "founded_date",
+            "headquarters",
+            "employee_count",
+            "annual_revenue",
+            "stock_ticker",
+            "date_of_birth",
+        ]
+    )
 
 
 class ConflictDetector:
@@ -189,25 +206,18 @@ class ConflictDetector:
         Returns:
             List of detected conflicts
         """
-        conflicts = []
+        conflicts: list[DetectedConflict] = []
 
         subject_entity_id = claim_data.get("subject_entity_id")
         predicate = claim_data.get("predicate")
-        object_value = claim_data.get("object_value")
         claim_id = claim_data.get("id")
-        source_id = claim_data.get("source_id")
-        confidence = claim_data.get("confidence", 0.8)
-        valid_from = claim_data.get("valid_from")
-        valid_until = claim_data.get("valid_until")
 
         if not subject_entity_id or not predicate:
             logger.warning("Missing subject_entity_id or predicate in claim")
             return conflicts
 
         # Get existing claims for this entity and predicate
-        existing_claims = await self._get_existing_claims(
-            subject_entity_id, predicate
-        )
+        existing_claims = await self._get_existing_claims(subject_entity_id, predicate)
 
         for existing in existing_claims:
             if existing.get("id") == claim_id:
@@ -255,7 +265,7 @@ class ConflictDetector:
         Returns:
             List of detected conflicts
         """
-        conflicts = []
+        conflicts: list[DetectedConflict] = []
 
         # Query for potential conflicts (same entity+predicate, different values)
         query = """
@@ -268,7 +278,7 @@ class ConflictDetector:
           AND c2.status IN ['current', 'CURRENT']
         """
 
-        params = {"limit": limit}
+        params: dict[str, Any] = {"limit": limit}
 
         if entity_id:
             query += " AND e.id = $entity_id"
@@ -301,10 +311,12 @@ class ConflictDetector:
                 predicate=record["predicate"],
                 values=[record["value1"], record["value2"]],
                 confidences=[record.get("conf1", 0.8), record.get("conf2", 0.8)],
-                source_ids=[s for s in [record.get("source1_id"), record.get("source2_id")] if s],
+                source_ids=[
+                    s for s in [record.get("source1_id"), record.get("source2_id")] if s
+                ],
                 severity=self._assess_severity(
                     record["predicate"],
-                    [record.get("conf1", 0.8), record.get("conf2", 0.8)]
+                    [record.get("conf1", 0.8), record.get("conf2", 0.8)],
                 ),
             )
             conflicts.append(conflict)
@@ -328,10 +340,13 @@ class ConflictDetector:
                s.reliability_score as source_reliability
         """
 
-        result = await self.client.execute_query(query, {
-            "entity_id": entity_id,
-            "predicate": predicate,
-        })
+        result = await self.client.execute_query(
+            query,
+            {
+                "entity_id": entity_id,
+                "predicate": predicate,
+            },
+        )
 
         return result.records
 
@@ -371,22 +386,31 @@ class ConflictDetector:
         existing_confidence = existing_claim.get("confidence", 0.8)
 
         # Skip if both confidences are too low
-        if new_confidence < self.config.min_confidence_threshold and \
-           existing_confidence < self.config.min_confidence_threshold:
+        if (
+            new_confidence < self.config.min_confidence_threshold
+            and existing_confidence < self.config.min_confidence_threshold
+        ):
             return None
 
         return DetectedConflict(
             id=f"conflict_{uuid4().hex[:12]}",
             conflict_type=ConflictType.VALUE_MISMATCH,
-            claim_ids=[new_claim.get("id", "unknown"), existing_claim.get("id", "unknown")],
+            claim_ids=[
+                new_claim.get("id", "unknown"),
+                existing_claim.get("id", "unknown"),
+            ],
             subject_entity_id=new_claim.get("subject_entity_id", "unknown"),
             predicate=predicate,
             values=[new_claim.get("object_value"), existing_claim.get("object_value")],
             confidences=[new_confidence, existing_confidence],
             source_ids=[
-                s for s in [new_claim.get("source_id"), existing_claim.get("source_id")] if s
+                s
+                for s in [new_claim.get("source_id"), existing_claim.get("source_id")]
+                if s
             ],
-            severity=self._assess_severity(predicate, [new_confidence, existing_confidence]),
+            severity=self._assess_severity(
+                predicate, [new_confidence, existing_confidence]
+            ),
             score=1.0 - similarity,  # Higher score = more certain of conflict
             metadata={
                 "value_similarity": similarity,
@@ -419,13 +443,17 @@ class ConflictDetector:
         # Parse dates if strings
         if isinstance(new_valid_from, str):
             try:
-                new_valid_from = datetime.fromisoformat(new_valid_from.replace('Z', '+00:00'))
+                new_valid_from = datetime.fromisoformat(
+                    new_valid_from.replace("Z", "+00:00")
+                )
             except ValueError:
                 new_valid_from = None
 
         if isinstance(existing_valid_from, str):
             try:
-                existing_valid_from = datetime.fromisoformat(existing_valid_from.replace('Z', '+00:00'))
+                existing_valid_from = datetime.fromisoformat(
+                    existing_valid_from.replace("Z", "+00:00")
+                )
             except ValueError:
                 existing_valid_from = None
 
@@ -435,8 +463,7 @@ class ConflictDetector:
 
         # Check for overlap
         overlap = self._check_temporal_overlap(
-            new_valid_from, new_valid_until,
-            existing_valid_from, existing_valid_until
+            new_valid_from, new_valid_until, existing_valid_from, existing_valid_until
         )
 
         if not overlap:
@@ -452,23 +479,40 @@ class ConflictDetector:
         return DetectedConflict(
             id=f"conflict_{uuid4().hex[:12]}",
             conflict_type=ConflictType.TEMPORAL,
-            claim_ids=[new_claim.get("id", "unknown"), existing_claim.get("id", "unknown")],
+            claim_ids=[
+                new_claim.get("id", "unknown"),
+                existing_claim.get("id", "unknown"),
+            ],
             subject_entity_id=new_claim.get("subject_entity_id", "unknown"),
             predicate=predicate,
             values=[new_claim.get("object_value"), existing_claim.get("object_value")],
             confidences=[
                 new_claim.get("confidence", 0.8),
-                existing_claim.get("confidence", 0.8)
+                existing_claim.get("confidence", 0.8),
             ],
             source_ids=[
-                s for s in [new_claim.get("source_id"), existing_claim.get("source_id")] if s
+                s
+                for s in [new_claim.get("source_id"), existing_claim.get("source_id")]
+                if s
             ],
             severity=ConflictSeverity.HIGH,
             metadata={
-                "new_valid_from": new_valid_from.isoformat() if new_valid_from else None,
-                "new_valid_until": new_valid_until.isoformat() if isinstance(new_valid_until, datetime) else new_valid_until,
-                "existing_valid_from": existing_valid_from.isoformat() if existing_valid_from else None,
-                "existing_valid_until": existing_valid_until.isoformat() if isinstance(existing_valid_until, datetime) else existing_valid_until,
+                "new_valid_from": (
+                    new_valid_from.isoformat() if new_valid_from else None
+                ),
+                "new_valid_until": (
+                    new_valid_until.isoformat()
+                    if isinstance(new_valid_until, datetime)
+                    else new_valid_until
+                ),
+                "existing_valid_from": (
+                    existing_valid_from.isoformat() if existing_valid_from else None
+                ),
+                "existing_valid_until": (
+                    existing_valid_until.isoformat()
+                    if isinstance(existing_valid_until, datetime)
+                    else existing_valid_until
+                ),
             },
         )
 
@@ -487,7 +531,7 @@ class ConflictDetector:
         Returns:
             List of semantic conflicts detected
         """
-        conflicts = []
+        conflicts: list[DetectedConflict] = []
         new_predicate = new_claim.get("predicate", "")
 
         # Check if the new predicate contradicts any existing predicates
@@ -506,10 +550,13 @@ class ConflictDetector:
                c.confidence as confidence, s.id as source_id
         """
 
-        result = await self.client.execute_query(query, {
-            "entity_id": entity_id,
-            "predicates": contradiction_predicates,
-        })
+        result = await self.client.execute_query(
+            query,
+            {
+                "entity_id": entity_id,
+                "predicates": contradiction_predicates,
+            },
+        )
 
         for record in result.records:
             conflict = DetectedConflict(
@@ -521,10 +568,12 @@ class ConflictDetector:
                 values=[new_claim.get("object_value"), record["object_value"]],
                 confidences=[
                     new_claim.get("confidence", 0.8),
-                    record.get("confidence", 0.8)
+                    record.get("confidence", 0.8),
                 ],
                 source_ids=[
-                    s for s in [new_claim.get("source_id"), record.get("source_id")] if s
+                    s
+                    for s in [new_claim.get("source_id"), record.get("source_id")]
+                    if s
                 ],
                 severity=ConflictSeverity.HIGH,
                 metadata={
@@ -613,13 +662,13 @@ class ConflictDetector:
         # Ensure datetime objects
         if isinstance(end1, str):
             try:
-                end1 = datetime.fromisoformat(end1.replace('Z', '+00:00'))
+                end1 = datetime.fromisoformat(end1.replace("Z", "+00:00"))
             except ValueError:
                 end1 = datetime.max
 
         if isinstance(end2, str):
             try:
-                end2 = datetime.fromisoformat(end2.replace('Z', '+00:00'))
+                end2 = datetime.fromisoformat(end2.replace("Z", "+00:00"))
             except ValueError:
                 end2 = datetime.max
 
@@ -644,7 +693,14 @@ class ConflictDetector:
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
 
         # High-impact predicates
-        high_impact = {"ceo", "revenue", "employee_count", "founded_date", "status", "price"}
+        high_impact = {
+            "ceo",
+            "revenue",
+            "employee_count",
+            "founded_date",
+            "status",
+            "price",
+        }
 
         if predicate in high_impact and avg_confidence > 0.8:
             return ConflictSeverity.CRITICAL
@@ -658,8 +714,10 @@ class ConflictDetector:
 
 # Pydantic models for API request/response
 
+
 class ConflictDetectionRequest(BaseModel):
     """Request to detect conflicts for a claim."""
+
     subject_entity_id: str
     predicate: str
     object_value: Any
@@ -672,6 +730,7 @@ class ConflictDetectionRequest(BaseModel):
 
 class ConflictDetectionResponse(BaseModel):
     """Response containing detected conflicts."""
+
     conflicts: list[dict[str, Any]]
     total_conflicts: int
     has_conflicts: bool
